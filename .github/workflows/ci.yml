@@ -1,0 +1,41 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    # Replace with your built image after pushing it to a registry
+    # container:
+    #   image: ghcr.io/YOUR_USERNAME/gto-solver:dev-cpu
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Dependencies (if not using container)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          g++-12 \
+          cmake \
+          python3-dev \
+          libpybind11-dev \
+          libspdlog-dev \
+          catch2 \
+          clang-format
+
+    - name: Configure CMake
+      run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-12
+
+    - name: Build
+      # Build using the number of cores available
+      run: cmake --build build --config Release -j $(nproc)
+
+    - name: Test
+      working-directory: ./build
+      # Run tests defined by CTest
+      run: ctest -C Release --output-on-failure 

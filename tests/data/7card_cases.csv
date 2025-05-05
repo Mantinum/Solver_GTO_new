@@ -1,0 +1,17 @@
+# Placeholder for 7-card evaluation test cases
+# Format: card1,card2,card3,card4,card5,card6,card7,expected_rank
+# Example (Actual data needed):
+# As,Ks,Qs,Js,Ts,2c,3d,1 # Royal Flush
+# 7h,6h,5h,4h,3h,Ad,Kc,9 # Straight Flush (7 high)
+# Ac,Ad,Ah,As,Kc,Qd,Jc,10 # Four Aces + King kicker
+# Th,Ts,Td,Tc,2s,3s,4s,10 # Four Tens
+# Kh,Ks,Kd,Qh,Qs,Jd,2c,167 # Full House KKKQQ
+# ... etc ...
+#
+# Need ~25k test cases as specified.
+# For now, just a header line:
+c1,c2,c3,c4,c5,c6,c7,rank
+As,Ks,Qs,Js,Ts,2c,3d,1
+7h,6h,5h,4h,3h,Ad,Kc,9
+Ac,Ad,Ah,As,Kc,Qd,Jc,10
+Kh,Ks,Kd,Qh,Qs,Jd,2c,167 
