@@ -9,7 +9,8 @@
 // Si BIG_BLIND_SIZE n'est pas global, il faudra peut-être l'injecter ou le récupérer autrement.
 // Pour cet exemple, on suppose qu'il est accessible ou défini (e.g., via une constante globale ou un include).
 // Si ce n'est pas le cas, le test devra être adapté.
-const double BIG_BLIND_SIZE = 2.0; // Placeholder si non défini globalement
+const double BIG_BLIND_SIZE_DOUBLE = 2.0; // Placeholder si non défini globalement. Utilisé pour calculs de pot.
+const int BIG_BLIND_SIZE_INT = 2; // Pour le constructeur de GameState
 
 using namespace gto_solver; // Assurez-vous que ce namespace est correct
 using Catch::Matchers::Contains; // Pour vérifier la présence d'un élément
@@ -39,7 +40,7 @@ TEST_CASE("ActionAbstraction Basic Tests", "[ActionAbstraction]") {
     SECTION("SB to act preflop, facing no action yet (only blinds)") {
         // Joueur 0 (SB) est au bouton, Joueur 1 (BB) poste la grosse blinde.
         // SB=1, BB=2. Pot=3. SB (P0) à parler. Amount to call = 1 (pour arriver à 2).
-        GameState st(2, /*stack=*/200, /*ante=*/0, /*button_pos=*/0);
+        GameState st(2, /*stack=*/200, /*ante=*/0, /*button_pos=*/0, BIG_BLIND_SIZE_INT);
         REQUIRE(st.get_current_player() == 0); 
         REQUIRE(st.get_pot_size() == 3);
         REQUIRE(st.get_current_bets()[0] == 1); // SB post
@@ -80,7 +81,7 @@ TEST_CASE("ActionAbstraction Basic Tests", "[ActionAbstraction]") {
     }
 
     SECTION("BB to act preflop, SB limped") {
-        GameState st(2, 200, 0, 0);
+        GameState st(2, 200, 0, 0, BIG_BLIND_SIZE_INT);
         // SB (P0) a misé 1, BB (P1) a misé 2. Pot = 3. P0 to act.
         // SB (P0) call pour compléter à 2. Sa mise totale devient 2.
         Action call_sb = {0, ActionType::CALL, 2}; 
@@ -124,7 +125,7 @@ TEST_CASE("ActionAbstraction Basic Tests", "[ActionAbstraction]") {
     }
 
     SECTION("No Fold option if Check is available") {
-        GameState st(2, 200, 0, 0); // SB to act (P0)
+        GameState st(2, 200, 0, 0, BIG_BLIND_SIZE_INT); // SB to act (P0)
         st.apply_action({0, ActionType::CALL, 2}); // SB limps, mise totale 2.
         // Tour de mise préflop terminé. On passe au flop. P1 (BB) à parler. Mises à 0.
         
@@ -140,7 +141,7 @@ TEST_CASE("ActionAbstraction Basic Tests", "[ActionAbstraction]") {
     }
 
     SECTION("Fold is available if facing a bet") {
-        GameState st(2, 200, 0, 0); // SB to act
+        GameState st(2, 200, 0, 0, BIG_BLIND_SIZE_INT); // SB to act
         // P0 (SB) raises to 6 (total bet)
         st.apply_action({0, ActionType::RAISE, 6}); 
         // P1 (BB) to act, facing a bet of 6 (needs to call 4 more)
@@ -156,19 +157,19 @@ TEST_CASE("ActionAbstraction Basic Tests", "[ActionAbstraction]") {
 
     SECTION("Raise sizing with small effective stack") {
         // P0 (SB) stack 10, P1 (BB) stack 200. Blinds 1/2.
-        GameState st(2, 0, 0, 0); // Initialize with 0, then set manually for clarity
+        GameState st(2, 0, 0, 0, BIG_BLIND_SIZE_INT); // Initialize with 0, then set manually for clarity
         // Manually set stacks (not available in constructor directly like this)
         // This test will require modification of GameState or a new constructor if we want to test this easily.
         // For now, let's simulate a situation where P0 has a small stack *after* posting blind.
         // Pot=3 (SB=1, BB=2), SB (P0) a 8 de stack restant, BB (P1) a 198 de stack restant.
         // P0 (SB) to act.
-        GameState st_small_stack(2, /*initial_stack=*/10, /*ante=*/0, /*button_pos=*/0);
+        GameState st_small_stack(2, /*initial_stack=*/10, /*ante=*/0, /*button_pos=*/0, BIG_BLIND_SIZE_INT);
         REQUIRE(st_small_stack.get_player_stack(0) == 9); // 10 - 1 (SB)
         REQUIRE(st_small_stack.get_player_stack(1) == 8); // 10 - 2 (BB) if BB also had 10. Let's fix.
         
         // Re-setup: P0 (BTN/SB) stack 10, P1 (BB) stack 20. Blinds 1/2.
         // SB posts 1, reste 9. BB posts 2, reste 18. Pot=3. SB to act.
-        GameState st_scenario(2, 0, 0, 0); // Dummy
+        GameState st_scenario(2, 0, 0, 0, BIG_BLIND_SIZE_INT); // Dummy
         // Need a way to set stacks: st_scenario.set_player_stack(0, 10); st_scenario.set_player_stack(1, 20);
         // And then post blinds... This is becoming complex for a unit test without GameState setters.
 
@@ -196,7 +197,7 @@ TEST_CASE("ActionAbstraction Basic Tests", "[ActionAbstraction]") {
         // SB (P0) 200, BB (P1) 200. Blinds 1/2. BTN=P0.
         // SB calls (total bet 2). Pot=4. BB to act.
         // BB raises to 198 (total bet for BB is 198, all-in for BB effectively, stack becomes 2).
-        GameState st_bb_raise(2, 200, 0, 0);
+        GameState st_bb_raise(2, 200, 0, 0, BIG_BLIND_SIZE_INT);
         st_bb_raise.apply_action({0, ActionType::CALL, 2}); // SB calls, P0 bet=2, P1 bet=2
         // BB (P1) raises. Initial stack 200, current_bet=2. Wants to raise TO 198.
         // Added amount = 198 - 2 = 196. Stack P1 = 200-196=4. Whoops, math error in setup.

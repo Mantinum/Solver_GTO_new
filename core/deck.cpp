@@ -1,5 +1,7 @@
 #include "core/deck.hpp"
+#include "core/bitboard.hpp" // Pour NUM_CARDS
 #include <stdexcept> // Pour std::runtime_error
+#include <random>       // Pour std::mt19937 et std::random_device
 
 namespace gto_solver {
 

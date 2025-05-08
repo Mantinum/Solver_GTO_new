@@ -5,6 +5,9 @@
 #include "spdlog/spdlog.h"
 #include <numeric> // Pour std::accumulate
 #include <stdexcept> // Pour std::runtime_error
+#include <fstream> // Pour std::ofstream
+#include <sstream> // Pour std::stringstream (pourrait être utile)
+#include <iomanip> // Pour std::setprecision
 
 namespace gto_solver {
 
@@ -372,6 +375,140 @@ double CFREngine::cfr_traverse(GameState current_state, std::vector<double>& pla
     // Si on voulait un visit_count pondéré, il faudrait le passer.
 
     return node_value;
+}
+
+// --- Sauvegarde / Chargement --- 
+
+bool CFREngine::save_infoset_map(const std::string& filename) const {
+    std::ofstream outfile(filename);
+    if (!outfile.is_open()) {
+        spdlog::error("Impossible d'ouvrir le fichier de sauvegarde : {}", filename);
+        return false;
+    }
+
+    spdlog::info("Sauvegarde de {} infosets dans {}...", infoset_map_.size(), filename);
+    outfile << std::fixed << std::setprecision(10); // Précision pour les doubles
+
+    for (const auto& pair : infoset_map_) {
+        const std::string& key = pair.first;
+        const InformationSet& node = pair.second;
+
+        // Format: cle;visit_count;regret1,regret2,...;strat1,strat2,...
+        outfile << key << ";" << node.visit_count << ";";
+
+        // Écrire les regrets cumulés
+        for (size_t i = 0; i < node.cumulative_regrets.size(); ++i) {
+            outfile << node.cumulative_regrets[i] << (i == node.cumulative_regrets.size() - 1 ? "" : ",");
+        }
+        outfile << ";";
+
+        // Écrire la stratégie cumulée
+        for (size_t i = 0; i < node.cumulative_strategy.size(); ++i) {
+            outfile << node.cumulative_strategy[i] << (i == node.cumulative_strategy.size() - 1 ? "" : ",");
+        }
+        outfile << "\n"; // Nouvelle ligne pour le prochain infoset
+    }
+
+    outfile.close();
+    if (outfile.fail()) { // Vérifier si la fermeture ou une écriture a échoué
+        spdlog::error("Erreur lors de l'écriture ou de la fermeture du fichier : {}", filename);
+        return false;
+    }
+    
+    spdlog::info("Sauvegarde terminée.");
+    return true;
+}
+
+bool CFREngine::load_infoset_map(const std::string& filename) {
+    std::ifstream infile(filename);
+    if (!infile.is_open()) {
+        spdlog::warn("Impossible d'ouvrir le fichier de chargement : {}. Aucun infoset chargé.", filename);
+        return false; // Pas forcément une erreur si le fichier n'existe pas au premier lancement
+    }
+
+    infoset_map_.clear(); // Vider la map actuelle avant de charger
+    std::string line;
+    long line_count = 0;
+    long loaded_count = 0;
+
+    spdlog::info("Chargement des infosets depuis {}...", filename);
+
+    while (std::getline(infile, line)) {
+        line_count++;
+        bool parse_error = false; // Drapeau pour gérer les erreurs sans goto
+        std::stringstream ss_line(line);
+        std::string segment;
+        std::vector<std::string> parts;
+
+        // Séparer par le délimiteur principal ';'
+        while (std::getline(ss_line, segment, ';')) {
+            parts.push_back(segment);
+        }
+
+        if (parts.size() != 4) { // clé;visits;regrets;strategie
+            spdlog::error("Erreur de format ligne {}: Nombre incorrect de segments ({}). Ligne: {}", line_count, parts.size(), line);
+            continue; // Passer à la ligne suivante
+        }
+
+        InformationSet node;
+        node.key = parts[0];
+
+        // Parser visit_count
+        try {
+            node.visit_count = std::stoll(parts[1]); // Utiliser stoll pour long long
+        } catch (const std::exception& e) {
+            spdlog::error("Erreur de format ligne {}: Impossible de parser visit_count '{}'. Raison: {}. Ligne: {}", 
+                          line_count, parts[1], e.what(), line);
+            continue;
+        }
+
+        // Parser les regrets (séparés par ',')
+        std::stringstream ss_regrets(parts[2]);
+        std::string regret_val_str;
+        while (std::getline(ss_regrets, regret_val_str, ',')) {
+            try {
+                node.cumulative_regrets.push_back(std::stod(regret_val_str)); // Utiliser stod pour double
+            } catch (const std::exception& e) {
+                spdlog::error("Erreur de format ligne {}: Impossible de parser la valeur de regret '{}'. Raison: {}. Ligne: {}", 
+                              line_count, regret_val_str, e.what(), line);
+                parse_error = true;
+                break; // Sortir de la boucle de parsing des regrets
+            }
+        }
+
+        if (parse_error) continue; // Passer à la ligne suivante si erreur dans les regrets
+
+        // Parser la stratégie (séparée par ',')
+        std::stringstream ss_strategy(parts[3]);
+        std::string strategy_val_str;
+        while (std::getline(ss_strategy, strategy_val_str, ',')) {
+            try {
+                node.cumulative_strategy.push_back(std::stod(strategy_val_str));
+            } catch (const std::exception& e) {
+                spdlog::error("Erreur de format ligne {}: Impossible de parser la valeur de stratégie '{}'. Raison: {}. Ligne: {}", 
+                              line_count, strategy_val_str, e.what(), line);
+                parse_error = true;
+                break; // Sortir de la boucle de parsing de la stratégie
+            }
+        }
+
+        if (parse_error) continue; // Passer à la ligne suivante si erreur dans la stratégie
+
+        // Vérifier la cohérence des tailles (optionnel mais utile)
+        if (node.cumulative_regrets.size() != node.cumulative_strategy.size()) {
+             spdlog::error("Erreur de format ligne {}: Tailles incohérentes pour regrets ({}) et stratégie ({}). Ligne: {}", 
+                           line_count, node.cumulative_regrets.size(), node.cumulative_strategy.size(), line);
+             continue; // Passer à la ligne suivante
+        }
+
+        // Si tout s'est bien passé, ajouter à la map
+        infoset_map_[node.key] = std::move(node); // Utiliser move pour efficacité
+        loaded_count++;
+    }
+
+    infile.close();
+    spdlog::info("Chargement terminé. {} infosets chargés depuis {} lignes.", loaded_count, line_count);
+    return true;
 }
 
 } 

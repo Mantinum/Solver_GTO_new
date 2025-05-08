@@ -24,6 +24,10 @@ public:
     // Permet d'accéder à la map des infosets (pour analyse ou debug)
     const InformationSetMap& get_infoset_map() const { return infoset_map_; }
 
+    // Méthodes pour sauvegarder et charger la map des infosets
+    bool save_infoset_map(const std::string& filename) const;
+    bool load_infoset_map(const std::string& filename);
+
 private:
     // Méthode CFR récursive principale.
     // player_reach_probs: vecteur des probabilités que chaque joueur atteigne cet état.

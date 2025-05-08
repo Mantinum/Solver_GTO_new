@@ -11,30 +11,31 @@
 #include "core/bitboard.hpp" // Pour NUM_CARDS
 
 // --- Constantes ---
-static constexpr int    SB_SIZE         = 1;
-static constexpr int    BB_SIZE         = 2;
+// const int SB_SIZE = 1; // Devenu obsolète, utiliser big_blind_size_ / 2
+// const int BB_SIZE = 2; // Devenu obsolète, utiliser big_blind_size_
 
 namespace gto_solver {
 
 // -----------------------------------------------------------------------------
 //  Constructeur / Destructeur
 // -----------------------------------------------------------------------------
-GameState::GameState(int num_players, int initial_stack, int ante, int button_pos)
+GameState::GameState(int num_players, int initial_stack, int ante, int button_pos, int big_blind_size)
     : num_players_          (num_players),
       stacks_               (num_players, initial_stack),
       current_bets_         (num_players, 0),
       pot_size_             (0),
-      current_player_index_ (0), // Init temp
-      last_raise_size_      (0),
-      button_pos_           (button_pos),
+      current_player_index_ (-1), // Sera défini par le début du jeu
+      last_raise_size_      (0), // Sera la BB initialement
+      button_pos_           (button_pos % num_players),
       ante_                 (ante),
+      big_blind_size_       (big_blind_size), // Initialiser le nouveau membre
       current_street_       (Street::PREFLOP),
       deck_                 (),
       player_hands_         (num_players, std::vector<Card>(2, INVALID_CARD)),
       board_                (),
       board_cards_dealt_    (0),
       has_folded_           (num_players, false),
-      last_aggressor_index_ (-1) // Initialisation (sera défini après les blinds)
+      last_aggressor_index_ (-1)
 {
     if (num_players <= 0) throw std::invalid_argument("Num players must be > 0");
     if (initial_stack < 0) throw std::invalid_argument("Initial stack >= 0");
@@ -47,28 +48,61 @@ GameState::GameState(int num_players, int initial_stack, int ante, int button_po
         if (hole < 2) player_hands_[player][hole] = deck_.deal_card();
     }
 
-    // Blinds
-    if (num_players_ == 2) { // HU
-        const int sb_player = button_pos_;
-        const int bb_player = (button_pos_ + 1) % num_players_;
-        int sb_post = std::min(stacks_[sb_player], SB_SIZE);
-        stacks_[sb_player] -= sb_post; current_bets_[sb_player] = sb_post; pot_size_ += sb_post;
-        int bb_post = std::min(stacks_[bb_player], BB_SIZE);
-        stacks_[bb_player] -= bb_post; current_bets_[bb_player] = bb_post; pot_size_ += bb_post;
-        current_player_index_ = sb_player; 
-        last_raise_size_ = BB_SIZE;
-        last_aggressor_index_ = bb_player; // BB est l'agresseur initial
-    } else { // 3+
-        const int sb_player = (button_pos_ + 1) % num_players_;
-        const int bb_player = (button_pos_ + 2) % num_players_;
-        int sb_post = std::min(stacks_[sb_player], SB_SIZE);
-        stacks_[sb_player] -= sb_post; current_bets_[sb_player] = sb_post; pot_size_ += sb_post;
-        int bb_post = std::min(stacks_[bb_player], BB_SIZE);
-        stacks_[bb_player] -= bb_post; current_bets_[bb_player] = bb_post; pot_size_ += bb_post;
-        current_player_index_ = (button_pos_ + 3) % num_players_; 
-        last_raise_size_ = BB_SIZE;
-        last_aggressor_index_ = bb_player; // BB est l'agresseur initial
+    // Logique pour poster les antes et les blinds
+    // Antes
+    if (ante_ > 0) {
+        for (int i = 0; i < num_players_; ++i) {
+            int ante_to_post = std::min(stacks_[i], ante_);
+            stacks_[i] -= ante_to_post;
+            current_bets_[i] += ante_to_post; // Les antes font partie des mises initiales
+            pot_size_ += ante_to_post;
+        }
     }
+
+    // Blinds (pour 2 joueurs, le bouton est SB)
+    if (num_players_ > 0) {
+        int sb_player = button_pos_;
+        int bb_player = (button_pos_ + 1) % num_players_;
+        
+        if (num_players_ == 1) { // Cas Heads-up simplifié où un seul joueur posterait tout
+             bb_player = sb_player;
+        }
+
+        // Small Blind
+        // int small_blind_amount = BB_SIZE / 2; // Ou big_blind_size_ / 2
+        int small_blind_amount = big_blind_size_ / 2; // Utiliser le big_blind_size passé
+        small_blind_amount = std::max(1, small_blind_amount); // Assurer au moins 1 si BB=1
+
+        int sb_to_post = std::min(stacks_[sb_player], small_blind_amount);
+        stacks_[sb_player] -= sb_to_post;
+        current_bets_[sb_player] += sb_to_post;
+        pot_size_ += sb_to_post;
+
+        // Big Blind (seulement si plus d'un joueur, sinon SB a déjà posté)
+        if (num_players_ > 1) {
+            // int big_blind_amount = BB_SIZE; // Ou big_blind_size_
+            int big_blind_amount = big_blind_size_; // Utiliser le big_blind_size passé
+            int bb_to_post = std::min(stacks_[bb_player], big_blind_amount);
+            stacks_[bb_player] -= bb_to_post;
+            current_bets_[bb_player] += bb_to_post;
+            pot_size_ += bb_to_post;
+            last_raise_size_ = big_blind_amount; // La BB est la première "relance" à battre
+            last_aggressor_index_ = bb_player; // Le BB est le premier agresseur
+            current_player_index_ = (bb_player + 1) % num_players_; // Action commence après BB (ou UTG)
+        } else { // Si un seul joueur, il a posté SB, et c'est son tour.
+            last_raise_size_ = small_blind_amount;
+            last_aggressor_index_ = sb_player;
+            current_player_index_ = sb_player;
+        }
+        // En Heads-Up, le SB (bouton) agit en premier preflop.
+        if (num_players_ == 2) {
+            current_player_index_ = button_pos_;
+        }
+
+    } else { // Pas de joueurs
+        current_player_index_ = 0;
+    }
+    // Distribuer les cartes privées (2 cartes par joueur pour Hold'em)
     spdlog::debug("GameState initialisé: {} joueurs, stack {}, BTN {}, Pot {}, Mises: {}, Premier: {}",
                   num_players_, initial_stack, button_pos_, pot_size_, fmt::join(current_bets_, ","), current_player_index_);
 }
@@ -134,7 +168,7 @@ void GameState::progress_to_next_street() {
 
     // Reset for next street
     std::fill(current_bets_.begin(), current_bets_.end(), 0);
-    last_raise_size_ = BB_SIZE;
+    last_raise_size_ = big_blind_size_; // Réinitialiser à la taille de la BB pour la nouvelle street
     last_aggressor_index_ = -1; // Pas d'agresseur au début d'une nouvelle street
 
     // Find first player to act
@@ -428,6 +462,10 @@ std::vector<Card> GameState::get_remaining_deck_cards() const {
         }
     }
     return remaining_cards;
+}
+
+int GameState::get_big_blind_size() const {
+    return big_blind_size_;
 }
 
 } // namespace gto_solver

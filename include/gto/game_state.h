@@ -40,7 +40,7 @@ enum class Street {
 class GameState {
 public:
     // Constructeur (basé sur l'utilisation dans le test)
-    GameState(int num_players, int initial_stack, int ante, int button_pos);
+    GameState(int num_players, int initial_stack, int ante, int button_pos, int big_blind_size);
     virtual ~GameState();
 
     // Méthodes publiques (basées sur l'utilisation dans action_abstraction.cpp et le test)
@@ -57,6 +57,7 @@ public:
     int get_board_cards_dealt() const;
     bool is_player_folded(int player_index) const;
     int get_num_players() const;
+    int get_big_blind_size() const;
 
     // Méthode pour obtenir les actions légales selon une abstraction donnée
     std::vector<Action> get_legal_abstract_actions(const ActionAbstraction& abstraction) const;
@@ -89,6 +90,7 @@ private:
     int last_raise_size_;
     int button_pos_;
     int ante_;
+    int big_blind_size_;
     Street current_street_;
     Deck deck_;
     std::vector<std::vector<Card>> player_hands_; // [player_idx][card_idx]

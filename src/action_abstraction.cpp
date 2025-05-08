@@ -11,7 +11,7 @@ namespace gto_solver {
 // Constantes utiles (pourraient être globales ou membres statiques)
 // Valeur de la Big Blind, utile pour définir la relance minimale absolue.
 // TODO: Rendre cette valeur configurable ou la récupérer depuis GameState/Config.
-static constexpr int BB_SIZE_FOR_MIN_RAISE = 2;
+// static constexpr int BB_SIZE_FOR_MIN_RAISE = 2; // Remplacé par state.get_big_blind_size()
 
 ActionAbstraction::ActionAbstraction(
     bool allow_fold,
@@ -187,7 +187,13 @@ void ActionAbstraction::add_raise_actions(std::vector<Action>& actions, const Ga
 
     // Calcul du min raise (selon les règles du poker)
     // L'incrément minimum est la taille de la dernière relance, mais au moins 1 BB.
-    int min_raise_increment = std::max(last_raise_size, BB_SIZE_FOR_MIN_RAISE);
+    int current_bb_size = state.get_big_blind_size();
+    if (current_bb_size <= 0) { // Sécurité si la BB n'est pas définie ou est invalide
+        spdlog::error("ActionAbstraction::add_raise_actions: Big Blind size est <= 0 ({}) depuis GameState. Utilisation fallback à 1.", current_bb_size);
+        current_bb_size = 1; // Fallback très conservateur
+    }
+    int min_raise_increment = std::max(last_raise_size, current_bb_size);
+
     // Le montant *total* de la mise minimale après relance
     int min_raise_total_bet = max_bet + min_raise_increment;
 
