@@ -12,16 +12,21 @@
 #include "core/cards.hpp"
 #include "core/deck.hpp" // Supposant l'existence de ce fichier
 
+// Inclure la définition de Action et ActionAbstraction
+#include "gto/action_abstraction.h"
+
 namespace gto_solver {
 
 // Supposer une structure ou classe Action simple pour l'instant
 // Si ActionType est défini dans action_abstraction.h, inclure ce header
-#include "gto/action_abstraction.h" // Pour ActionType
+//#include "gto/action_abstraction.h" // Pour ActionType <<-- DÉJÀ FAIT CI-DESSUS
+/* <<-- STRUCTURE ACTION SUPPRIMÉE D'ICI
 struct Action {
     int player_index;
     gto_solver::ActionType type; // <-- AJOUTÉ gto_solver::
     int amount; // Montant de l'action (pour CALL, RAISE)
 };
+*/
 
 // Enum pour les tours de jeu
 enum class Street {
@@ -53,6 +58,12 @@ public:
     bool is_player_folded(int player_index) const;
     int get_num_players() const;
 
+    // Méthode pour obtenir les actions légales selon une abstraction donnée
+    std::vector<Action> get_legal_abstract_actions(const ActionAbstraction& abstraction) const;
+
+    // Méthode pour obtenir les cartes restantes dans le deck
+    std::vector<Card> get_remaining_deck_cards() const;
+
     // Méthodes de test (placeholders)
     int get_current_player_placeholder() const { return 0; }
     int get_player_stack_placeholder(int player_index) const { return 200; }
@@ -83,7 +94,8 @@ private:
     std::vector<std::vector<Card>> player_hands_; // [player_idx][card_idx]
     std::array<Card, 5> board_;
     int board_cards_dealt_;
-    std::vector<bool> has_folded_; // Pour suivre les folds
+    std::vector<bool> has_folded_; // Taille [num_players]
+    int last_aggressor_index_;
     // ... autres états ...
 
     // Méthodes privées

@@ -7,7 +7,7 @@
 //  NB : les vraies tables de lookup (hash_values / hash_adjust) sont
 //  définies dans external/2p2/pokerlib.cpp et simplement référencées ici.
 // ─────────────────────────────────────────────────────────────────────────────
-#include "eval/hand_evaluator.hpp"
+#include "hand_evaluator.hpp"
 #include "core/bitboard.hpp"
 #include "core/cards.hpp"
 #include <stdexcept>                // Pour std::runtime_error

@@ -7,6 +7,7 @@ add_executable(gto_tests
     bench_eval.cpp
     # hand_evaluator_tests.cpp # <-- SUPPRIMÉ car fichier introuvable et eval_tests.cpp existe déjà
     action_abstraction_tests.cpp
+    information_set_tests.cpp
 )
 
 # Définir le chemin vers HandRanks.dat comme une macro C++
@@ -29,6 +30,7 @@ target_include_directories(gto_tests PRIVATE
 # Link Catch2 using the target provided by FetchContent
 # Lier aussi gto_core et gto_eval
 target_link_libraries(gto_tests PRIVATE 
+    gto_solver_lib          # <-- AJOUTÉ: Contient GameState et ActionAbstraction
     gto_eval                # Pour evaluator functions (contient eval_7hand)
     gto_core                # Nouvelle bibliothèque core (utilise eval_7hand)
     Catch2::Catch2WithMain # Target from FetchContent (provides main)
