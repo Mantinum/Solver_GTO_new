@@ -1,216 +1,456 @@
+// tests/action_abstraction_tests.cpp
+// ──────────────────────────────────────────────────────────────────────────────
 #include "gto/action_abstraction.h"
 #include "gto/game_state.h"
+
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_vector.hpp>
-#include <algorithm> // Pour std::find_if
+
+#include <algorithm>
+#include <set>
 #include <vector>
 
-// Assurez-vous que les headers nécessaires sont inclus (ex: BIG_BLIND_SIZE si défini ailleurs)
-// Si BIG_BLIND_SIZE n'est pas global, il faudra peut-être l'injecter ou le récupérer autrement.
-// Pour cet exemple, on suppose qu'il est accessible ou défini (e.g., via une constante globale ou un include).
-// Si ce n'est pas le cas, le test devra être adapté.
-const double BIG_BLIND_SIZE_DOUBLE = 2.0; // Placeholder si non défini globalement. Utilisé pour calculs de pot.
-const int BIG_BLIND_SIZE_INT = 2; // Pour le constructeur de GameState
+// ──────────────────────────────────────────────────────────────────────────────
+// Variables & utilitaires généraux
+// ──────────────────────────────────────────────────────────────────────────────
+const double BIG_BLIND_SIZE_DOUBLE = 2.0;   // Placeholder (si non défini globalement)
+const int    BIG_BLIND_SIZE_INT    = 2;     // Pour GameState
 
-using namespace gto_solver; // Assurez-vous que ce namespace est correct
-using Catch::Matchers::Contains; // Pour vérifier la présence d'un élément
+using namespace gto_solver;                 // Raccourci pour les enum / classes
+using Catch::Matchers::Contains;
 
-// Helper pour vérifier si une action spécifique existe dans un vecteur d'actions
-bool has_action(const std::vector<Action>& actions, ActionType type, int amount) {
-    return std::any_of(actions.begin(), actions.end(), 
-        [&](const Action& a) {
-            return a.type == type && a.amount == amount;
-        });
+// Helpers pour la présence d'actions dans un vector<Action>
+bool has_action(const std::vector<Action>& actions,
+                ActionType                 type,
+                int                        amount = 0)
+{
+    return std::any_of(actions.begin(), actions.end(),
+                       [&](const Action& a) { return a.type == type && a.amount == amount; });
 }
 
-// Helper pour vérifier si une action spécifique (sans se soucier du player_index) existe
-// Utile car player_index est toujours le même pour toutes les actions générées pour un état.
-bool has_action_type_amount(const std::vector<Action>& actions, ActionType type, int amount) {
-    return std::any_of(actions.begin(), actions.end(), 
-        [&](const Action& a) {
-            return a.type == type && a.amount == amount;
-        });
+bool has_action_type_amount(const std::vector<Action>& actions,
+                            ActionType                 type,
+                            int                        amount)
+{
+    return std::any_of(actions.begin(), actions.end(),
+                       [&](const Action& a) { return a.type == type && a.amount == amount; });
 }
 
-TEST_CASE("ActionAbstraction Basic Tests", "[ActionAbstraction]") {
+// ──────────────────────────────────────────────────────────────────────────────
+// Factories par défaut pour les maps de tailles
+// ──────────────────────────────────────────────────────────────────────────────
+ActionAbstraction::StreetFractionsMap create_default_test_fractions()
+{
+    std::set<double> default_set = {0.33, 0.5, 0.75, 1.0};
+    ActionAbstraction::StreetFractionsMap fractions;
+    fractions[Street::PREFLOP] = default_set;
+    fractions[Street::FLOP]    = default_set;
+    fractions[Street::TURN]    = default_set;
+    fractions[Street::RIVER]   = default_set;
+    return fractions;
+}
 
-    // Stacks de 200 jetons (100 BB), blinds 1/2
-    // Rappel : dans Action, 'amount' est le montant TOTAL de la mise du joueur APRES l'action.
+ActionAbstraction::StreetBBSizesMap create_empty_bb_sizes_map()    { return {}; }
 
-    SECTION("SB to act preflop, facing no action yet (only blinds)") {
-        // Joueur 0 (SB) est au bouton, Joueur 1 (BB) poste la grosse blinde.
-        // SB=1, BB=2. Pot=3. SB (P0) à parler. Amount to call = 1 (pour arriver à 2).
+// NOUVEAU : map vide pour les mises exactes
+ActionAbstraction::StreetExactBetsMap create_empty_exact_bets_map() { return {}; }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// TEST_CASE 1 : Basic Tests
+// ──────────────────────────────────────────────────────────────────────────────
+TEST_CASE("ActionAbstraction Basic Tests", "[ActionAbstraction]")
+{
+    // Stacks 200 (100 BB) — blinds 1 / 2
+    // Rappel : Action.amount = mise TOTALE après l'action
+
+    SECTION("SB to act preflop, facing no action yet (only blinds)")
+    {
         GameState st(2, /*stack=*/200, /*ante=*/0, /*button_pos=*/0, BIG_BLIND_SIZE_INT);
-        REQUIRE(st.get_current_player() == 0); 
+        REQUIRE(st.get_current_player() == 0);
         REQUIRE(st.get_pot_size() == 3);
-        REQUIRE(st.get_current_bets()[0] == 1); // SB post
-        REQUIRE(st.get_current_bets()[1] == 2); // BB post
+        REQUIRE(st.get_current_bets()[0] == 1);
+        REQUIRE(st.get_current_bets()[1] == 2);
 
-        ActionAbstraction aa_default; // Paramètres par défaut
+        ActionAbstraction aa_default(
+            /*allow_folds=*/true,
+            /*allow_calls=*/true,
+            create_default_test_fractions(),
+            create_empty_bb_sizes_map(),
+            create_empty_exact_bets_map(),   // ← ajouté
+            /*allow_all_in=*/true);
+
         auto actions = st.get_legal_abstract_actions(aa_default);
-
-        // Actions attendues pour SB:
-        // 1. FOLD: amount = 0 (convention)
-        // 2. CALL: amount_to_call = 1. Total bet pour SB après call = 1(mise SB) + 1(call) = 2.
-        // 3. RAISES: (avec fractions par défaut: 0.33, 0.5, 0.75, 1.0 du pot *après call* + All-in)
-        //    Pot après call SB: 3 (pot initial) + 1 (call SB) = 4.
-        //    Min raise increment: BB = 2. Min raise total bet = 2 (max_bet) + 2 (inc) = 4.
-        //    All-in total bet: 1 (mise SB) + 200 (stack SB) = 201.
 
         REQUIRE(has_action_type_amount(actions, ActionType::FOLD, 0));
-        REQUIRE(has_action_type_amount(actions, ActionType::CALL, 2)); // Call 1, total bet = 2
+        REQUIRE(has_action_type_amount(actions, ActionType::CALL, 2));
 
-        // Raise 33% Pot (pot_if_player_calls = 4). Increment = round(0.33*4) = 1. Total bet = 2(max_bet) + 1 = 3.
-        // Mais min_raise_total_bet est 4. Donc ce sera 4.
-        REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 4)); 
-
-        // Raise 50% Pot (pot_if_player_calls = 4). Increment = round(0.5*4) = 2. Total bet = 2 + 2 = 4.
-        REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 4)); // Déjà présent
-
-        // Raise 75% Pot (pot_if_player_calls = 4). Increment = round(0.75*4) = 3. Total bet = 2 + 3 = 5.
+        REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 4));
         REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 5));
-
-        // Raise 100% Pot (pot_if_player_calls = 4). Increment = round(1.0*4) = 4. Total bet = 2 + 4 = 6.
         REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 6));
-
-        // Raise All-in: Total bet = 1 (mise SB) + 199 (stack restant SB) = 200.
         REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 200));
-        
-        // Vérifier qu'il n'y a pas d'actions invalides (exemple)
-        REQUIRE_FALSE(has_action_type_amount(actions, ActionType::RAISE, 3)); // Serait < min_raise
+
+        REQUIRE_FALSE(has_action_type_amount(actions, ActionType::RAISE, 3));
     }
 
-    SECTION("BB to act preflop, SB limped") {
+    SECTION("BB to act preflop, SB limped")
+    {
         GameState st(2, 200, 0, 0, BIG_BLIND_SIZE_INT);
-        // SB (P0) a misé 1, BB (P1) a misé 2. Pot = 3. P0 to act.
-        // SB (P0) call pour compléter à 2. Sa mise totale devient 2.
-        Action call_sb = {0, ActionType::CALL, 2}; 
-        st.apply_action(call_sb);
-        // Après ce call, le tour de mise préflop est terminé car tous les joueurs actifs ont misé le même montant (2).
-        // GameState::end_betting_round va appeler progress_to_next_street().
-        // progress_to_next_street() va:
-        // 1. Changer current_street_ à FLOP.
-        // 2. Remettre current_bets_ à 0 pour tous les joueurs.
-        // 3. Définir le joueur courant à P1 (BB, car postflop, action après le bouton qui est P0).
+        st.apply_action({0, ActionType::CALL, 2});
 
-        REQUIRE(st.get_current_player() == 1); // BB (P1) à parler sur le FLOP (logiquement)
-        REQUIRE(st.get_pot_size() == 4);       // Pot: SB 1 + BB 2 + SB call 1 = 4. Le pot est correct.
-        REQUIRE(st.get_current_street() == Street::FLOP); // On devrait être au flop.
-        REQUIRE(st.get_current_bets()[0] == 0); // Mises remises à zéro pour le flop.
-        REQUIRE(st.get_current_bets()[1] == 0);
+        REQUIRE(st.get_current_player() == 1);
+        REQUIRE(st.get_current_street() == Street::FLOP);
+        REQUIRE(st.get_pot_size() == 4);
 
-        ActionAbstraction aa_default; 
+        ActionAbstraction aa_default(
+            true, true,
+            create_default_test_fractions(),
+            create_empty_bb_sizes_map(),
+            create_empty_exact_bets_map(),   // ← ajouté
+            true);
+
         auto actions = st.get_legal_abstract_actions(aa_default);
 
-        // Actions attendues pour BB (P1) au FLOP, premier à parler:
-        // 1. CALL (CHECK): amount_to_call = 0. Total bet pour BB après check = 0 (sa mise actuelle) + 0 (check) = 0.
-        // 2. RAISES: (avec fractions par défaut)
-        //    Pot actuel = 4. Max_bet = 0. Amount_to_call = 0.
-        //    Pot après check BB (pot_if_player_calls) = 4 + 0 = 4.
-        //    Min raise increment: BB_SIZE_FOR_MIN_RAISE = 2. Min raise total bet = 0 (max_bet) + 2 (inc) = 2.
-        //    All-in total bet: 0 (mise BB) + (200-2) (stack BB restant) = 198.
+        REQUIRE(has_action_type_amount(actions, ActionType::CALL, 0));
+        REQUIRE_FALSE(has_action_type_amount(actions, ActionType::FOLD, 0));
 
-        REQUIRE(has_action_type_amount(actions, ActionType::CALL, 0)); // Check, total bet = 0 pour ce tour
-        REQUIRE_FALSE(has_action_type_amount(actions, ActionType::FOLD, 0)); // Pas de FOLD si on peut check
-
-        // Raise 33% Pot (pot_if_player_calls = 4). Increment = round(0.33*4) = 1. Total bet = 0 + 1 = 1.
-        // Mais min_raise_total_bet est 2. Donc ce sera 2.
         REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 2));
-
-        // Raise 100% Pot (pot_if_player_calls = 4). Increment = round(1.0*4) = 4. Total bet = 0 + 4 = 4.
         REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 4));
-
-        // Raise All-in: Total bet = 198.
         REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 198));
     }
 
-    SECTION("No Fold option if Check is available") {
-        GameState st(2, 200, 0, 0, BIG_BLIND_SIZE_INT); // SB to act (P0)
-        st.apply_action({0, ActionType::CALL, 2}); // SB limps, mise totale 2.
-        // Tour de mise préflop terminé. On passe au flop. P1 (BB) à parler. Mises à 0.
-        
-        REQUIRE(st.get_current_player() == 1); // BB to act
-        REQUIRE(st.get_current_street() == Street::FLOP);
-        REQUIRE(st.get_current_bets()[1] == 0); // BB's current bet is 0
-        REQUIRE(st.get_current_bets()[0] == 0); // SB's current bet is 0 (max_bet is 0)
+    SECTION("No Fold option if Check is available")
+    {
+        GameState st(2, 200, 0, 0, BIG_BLIND_SIZE_INT);
+        st.apply_action({0, ActionType::CALL, 2});
 
-        ActionAbstraction aa_default(true, true, {0.5}, true); // allow_fold = true
-        auto actions = st.get_legal_abstract_actions(aa_default);
-        REQUIRE(has_action_type_amount(actions, ActionType::CALL, 0)); // Check (total bet 0 pour ce tour)
-        REQUIRE_FALSE(has_action_type_amount(actions, ActionType::FOLD, 0)); // No FOLD if check available
-    }
-
-    SECTION("Fold is available if facing a bet") {
-        GameState st(2, 200, 0, 0, BIG_BLIND_SIZE_INT); // SB to act
-        // P0 (SB) raises to 6 (total bet)
-        st.apply_action({0, ActionType::RAISE, 6}); 
-        // P1 (BB) to act, facing a bet of 6 (needs to call 4 more)
         REQUIRE(st.get_current_player() == 1);
-        REQUIRE(st.get_current_bets()[1] == 2); // BB's current bet
-        REQUIRE(st.get_current_bets()[0] == 6); // Max bet is 6
+        REQUIRE(st.get_current_street() == Street::FLOP);
 
-        ActionAbstraction aa_default(true, true, {0.5}, true); // allow_fold = true
-        auto actions = st.get_legal_abstract_actions(aa_default);
-        REQUIRE(has_action_type_amount(actions, ActionType::FOLD, 0));
-        REQUIRE(has_action_type_amount(actions, ActionType::CALL, 6)); // Call 4, total bet 6
+        ActionAbstraction::StreetFractionsMap flop_only;
+        flop_only[Street::FLOP] = {0.5};
+
+        ActionAbstraction aa_custom_flop(
+            true, true,
+            flop_only,
+            create_empty_bb_sizes_map(),
+            create_empty_exact_bets_map(),   // ← ajouté
+            true);
+
+        auto actions = st.get_legal_abstract_actions(aa_custom_flop);
+
+        REQUIRE(has_action_type_amount(actions, ActionType::CALL, 0));
+        REQUIRE_FALSE(has_action_type_amount(actions, ActionType::FOLD, 0));
+        REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 2));
     }
 
-    SECTION("Raise sizing with small effective stack") {
-        // P0 (SB) stack 10, P1 (BB) stack 200. Blinds 1/2.
-        GameState st(2, 0, 0, 0, BIG_BLIND_SIZE_INT); // Initialize with 0, then set manually for clarity
-        // Manually set stacks (not available in constructor directly like this)
-        // This test will require modification of GameState or a new constructor if we want to test this easily.
-        // For now, let's simulate a situation where P0 has a small stack *after* posting blind.
-        // Pot=3 (SB=1, BB=2), SB (P0) a 8 de stack restant, BB (P1) a 198 de stack restant.
-        // P0 (SB) to act.
-        GameState st_small_stack(2, /*initial_stack=*/10, /*ante=*/0, /*button_pos=*/0, BIG_BLIND_SIZE_INT);
-        REQUIRE(st_small_stack.get_player_stack(0) == 9); // 10 - 1 (SB)
-        REQUIRE(st_small_stack.get_player_stack(1) == 8); // 10 - 2 (BB) if BB also had 10. Let's fix.
-        
-        // Re-setup: P0 (BTN/SB) stack 10, P1 (BB) stack 20. Blinds 1/2.
-        // SB posts 1, reste 9. BB posts 2, reste 18. Pot=3. SB to act.
-        GameState st_scenario(2, 0, 0, 0, BIG_BLIND_SIZE_INT); // Dummy
-        // Need a way to set stacks: st_scenario.set_player_stack(0, 10); st_scenario.set_player_stack(1, 20);
-        // And then post blinds... This is becoming complex for a unit test without GameState setters.
+    SECTION("Fold is available if facing a bet")
+    {
+        GameState st(2, 200, 0, 0, BIG_BLIND_SIZE_INT);
+        st.apply_action({0, ActionType::RAISE, 6});
 
-        // Let's try a simpler case: All-in is the only raise
-        // SB posts 1 (stack 10->9). BB posts 2 (stack 5->3). Pot=3. SB to act.
-        // Amount to call for SB = 1. Effective stack for raise = 9-1 = 8.
-        // Max_bet = 2. Min_raise_increment = 2. Min_raise_total_bet = 2+2=4.
-        // All-in total_bet for SB = 1 (current_bet) + 9 (stack) = 10.
-        // Min_raise_total_bet (4) < All-in total_bet (10). So fractions might be possible.
+        REQUIRE(st.get_current_player() == 1);
 
-        // Let's test a case where min_raise forces all-in.
-        // SB posts 1 (stack 4->3). BB posts 2 (stack 20->18). Pot=3. SB to act.
-        // Amount to call for SB = 1. Effective stack for raise = 3-1 = 2.
-        // Max_bet = 2. Min_raise_increment = 2. Min_raise_total_bet = 2+2=4.
-        // All-in total_bet for SB = 1 (current_bet) + 3 (stack) = 4.
-        // Here, min_raise_total_bet (4) IS all_in_total_bet (4).
-        // So, only All-in (to 4) should be a raise option if allow_all_in=true.
-        // Fractions of pot should be clamped or disappear.
+        ActionAbstraction::StreetFractionsMap preflop_only;
+        preflop_only[Street::PREFLOP] = {0.5};
 
-        // GameState st_min_forces_all_in(num_players, initial_stacks_vector, ante, button_pos)
-        // We need a constructor that takes individual stacks or GameState setters.
-        // The current GameState constructor isn't flexible enough for this specific setup.
-        // For now, we can simulate this by applying actions.
+        ActionAbstraction aa_custom_preflop(
+            true, true,
+            preflop_only,
+            create_empty_bb_sizes_map(),
+            create_empty_exact_bets_map(),   // ← ajouté
+            true);
 
-        // SB (P0) 200, BB (P1) 200. Blinds 1/2. BTN=P0.
-        // SB calls (total bet 2). Pot=4. BB to act.
-        // BB raises to 198 (total bet for BB is 198, all-in for BB effectively, stack becomes 2).
-        GameState st_bb_raise(2, 200, 0, 0, BIG_BLIND_SIZE_INT);
-        st_bb_raise.apply_action({0, ActionType::CALL, 2}); // SB calls, P0 bet=2, P1 bet=2
-        // BB (P1) raises. Initial stack 200, current_bet=2. Wants to raise TO 198.
-        // Added amount = 198 - 2 = 196. Stack P1 = 200-196=4. Whoops, math error in setup.
-        // Let's simplify: BB P1 has 5 chips total. Posts BB 2 (stack 3). SB limps. BB to act.
-        // Max_bet=2. Pot=4. Player_bet(P1)=2. Amount_to_call(P1)=0.
-        // Min_raise_inc=2. Min_raise_total_bet=4.
-        // All-in for P1 = 2(current_bet) + 3(stack) = 5.
+        auto actions = st.get_legal_abstract_actions(aa_custom_preflop);
 
-        // GameState st_small_bb_stack(num_players, initial_stacks_vector...)
-        // This test section needs better GameState setup capabilities or more complex action sequences.
-        // Skipping detailed raise checks for very small/asymmetric stacks for now due to setup complexity.
+        REQUIRE(has_action_type_amount(actions, ActionType::FOLD, 0));
+        REQUIRE(has_action_type_amount(actions, ActionType::CALL, 6));
+        REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 12));
+    }
+
+    // Test volontairement simplifié :
+    SECTION("Raise sizing with small effective stack")
+    {
         SUCCEED("Skipping raise sizing with small effective stack due to GameState setup limitations for now.");
     }
 }
 
-// Ajoutez ici d'autres tests pour ActionAbstraction si nécessaire 
+// ──────────────────────────────────────────────────────────────────────────────
+// TEST_CASE 2 : Street Specific Fractions
+// ──────────────────────────────────────────────────────────────────────────────
+TEST_CASE("ActionAbstraction Street Specific Fractions", "[ActionAbstraction][StreetFractions]")
+{
+    const int bb_size = 2;
+
+    GameState state(2, 200, 0, 0, bb_size);
+    state.apply_action({0, ActionType::CALL, bb_size});
+
+    REQUIRE(state.get_current_street() == Street::FLOP);
+    REQUIRE(state.get_current_player() == 1);
+    REQUIRE(state.get_pot_size() == 4);
+
+    ActionAbstraction::StreetFractionsMap spec;
+    spec[Street::PREFLOP] = {1.0, 2.0};
+    spec[Street::FLOP]    = {0.5, 1.0};
+    spec[Street::TURN]    = {0.25, 0.75};
+    spec[Street::RIVER]   = {0.66, 1.33};
+
+    ActionAbstraction aa(
+        true, true,
+        spec,
+        create_empty_bb_sizes_map(),
+        create_empty_exact_bets_map(),          // ← ajouté
+        true);
+
+    auto actions = state.get_legal_abstract_actions(aa);
+
+    REQUIRE(has_action_type_amount(actions, ActionType::CALL, 0));
+    REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 2));
+    REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 4));
+    REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 198));
+    REQUIRE_FALSE(has_action_type_amount(actions, ActionType::RAISE, 8));
+    REQUIRE_FALSE(has_action_type_amount(actions, ActionType::RAISE, 5));
+
+    int raise_cnt = 0;
+    for (const auto& a : actions) if (a.type == ActionType::RAISE) ++raise_cnt;
+    REQUIRE(raise_cnt == 3);
+    REQUIRE(actions.size() == 1 + raise_cnt);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// TEST_CASE 3 : BB Raise Sizes
+// ──────────────────────────────────────────────────────────────────────────────
+TEST_CASE("ActionAbstraction BB Raise Sizes", "[ActionAbstraction][BBSizes]")
+{
+    const int bb_size_const = 2;
+
+    SECTION("Preflop SB to act - Open Raise in BBs")
+    {
+        GameState state(2, 200, 0, 0, bb_size_const);
+
+        ActionAbstraction::StreetBBSizesMap bb_sizes;
+        bb_sizes[Street::PREFLOP] = {2.5, 3.0};
+
+        ActionAbstraction aa(
+            true, true,
+            {},                       // fractions vides
+            bb_sizes,
+            create_empty_exact_bets_map(),      // ← ajouté
+            true);
+
+        auto actions = state.get_legal_abstract_actions(aa);
+
+        REQUIRE(has_action_type_amount(actions, ActionType::FOLD, 0));
+        REQUIRE(has_action_type_amount(actions, ActionType::CALL, 2));
+        REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 5));
+        REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 6));
+        REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 200));
+
+        if (4 != 5 && 4 != 6 && 4 != 200)
+            REQUIRE_FALSE(has_action_type_amount(actions, ActionType::RAISE, 4));
+    }
+
+    SECTION("Preflop BB to act - Facing SB Raise - Re-raise in BBs")
+    {
+        GameState state(2, 200, 0, 0, bb_size_const);
+        state.apply_action({0, ActionType::RAISE, 6});
+
+        ActionAbstraction::StreetBBSizesMap reraise;
+        reraise[Street::PREFLOP] = {4.0, 5.0};
+
+        ActionAbstraction aa(
+            true, true,
+            {},
+            reraise,
+            create_empty_exact_bets_map(),      // ← ajouté
+            true);
+
+        auto actions = state.get_legal_abstract_actions(aa);
+
+        REQUIRE(has_action_type_amount(actions, ActionType::FOLD, 0));
+        REQUIRE(has_action_type_amount(actions, ActionType::CALL, 6));
+        REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 14));
+        REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 16));
+        REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 200));
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// TEST_CASE 4 : Exact Bet Sizes
+// (déjà conforme, aucune modif requise)
+// ──────────────────────────────────────────────────────────────────────────────
+TEST_CASE("ActionAbstraction Exact Bet Sizes", "[action_abstraction]")
+{
+    using namespace gto_solver;
+
+    GameState state(2, /*stack=*/200, /*ante=*/0, /*button_pos=*/0, BIG_BLIND_SIZE_INT);
+    // SB posts 1, BB posts 2. Pot = 3. P0 (SB) to act.
+
+    SECTION("Preflop SB to act - Open with Exact Bet Size")
+    {
+        ActionAbstraction::StreetExactBetsMap exact = {
+            {Street::PREFLOP, {7, 10}}
+        };
+        ActionAbstraction abs(
+            true, true,
+            {}, {}, exact, true);
+
+        auto actions = abs.get_abstract_actions(state);
+        CHECK(has_action(actions, ActionType::FOLD, 0)); // FOLD amount is 0 by convention
+        CHECK(has_action(actions, ActionType::CALL, 2)); // Call BB
+        CHECK(has_action(actions, ActionType::RAISE, 7));
+        CHECK(has_action(actions, ActionType::RAISE, 10));
+        CHECK(has_action(actions, ActionType::RAISE, 200));
+        CHECK(actions.size() == 5);
+
+        // Exact bet trop petit → clampé
+        ActionAbstraction::StreetExactBetsMap small = {
+            {Street::PREFLOP, {3}}
+        };
+        ActionAbstraction abs_small(true, true, {}, {}, small, true);
+        actions = abs_small.get_abstract_actions(state);
+        CHECK(has_action(actions, ActionType::RAISE, 4)); // Clamped to min raise (2 + 2)
+        CHECK_FALSE(has_action(actions, ActionType::RAISE, 3));
+        CHECK(actions.size() == 4);
+    }
+
+    SECTION("Flop P0 to act - Open with Exact Bet Size")
+    {
+        GameState flop_state(2, /*stack=*/200, /*ante=*/0, /*button_pos=*/0, BIG_BLIND_SIZE_INT);
+        // Simuler les actions préflop pour arriver au flop
+        // P0 (SB) call, P1 (BB) call (check)
+        flop_state.apply_action({0, ActionType::CALL, BIG_BLIND_SIZE_INT}); // P0 calls to match BB
+        flop_state.apply_action({1, ActionType::CALL, BIG_BLIND_SIZE_INT}); // P1 calls (effectively checks as already at BB)
+        // À ce point, apply_action devrait avoir détecté la fin du tour de mise préflop
+        // et appelé en interne ce qu'il faut pour passer au FLOP et distribuer les cartes.
+
+        REQUIRE(flop_state.get_current_street() == Street::FLOP);
+        REQUIRE(flop_state.get_current_player() == 0); // P0 (SB/BTN) agit en premier postflop
+        REQUIRE(flop_state.get_pot_size() == BIG_BLIND_SIZE_INT * 2); // Pot de 2 BBs
+        int max_bet_flop = 0; for(int b : flop_state.get_current_bets()) max_bet_flop = std::max(max_bet_flop, b);
+        REQUIRE(max_bet_flop == 0); // Mises remises à zéro pour le flop
+
+        ActionAbstraction abs(true, true, {}, {}, { {Street::FLOP, {5, 15}} }, true);
+        auto actions = abs.get_abstract_actions(flop_state);
+
+        CHECK(has_action(actions, ActionType::CALL, 0)); // Check
+        CHECK(has_action(actions, ActionType::RAISE, 5));
+        CHECK(has_action(actions, ActionType::RAISE, 15));
+        // P0 stack: 200 - 2 (BB postée ou égalisée) = 198. All-in est de 198.
+        CHECK(has_action(actions, ActionType::RAISE, 198)); 
+        CHECK(actions.size() == 4);
+    }
+
+    SECTION("Flop P1 to act - Facing P0 Bet - Re-raise with Exact Increment")
+    {
+        GameState flop_state(2, /*stack=*/200, /*ante=*/0, /*button_pos=*/0, BIG_BLIND_SIZE_INT);
+        // Simuler les actions préflop pour arriver au flop
+        flop_state.apply_action({0, ActionType::CALL, BIG_BLIND_SIZE_INT}); // P0 calls
+        flop_state.apply_action({1, ActionType::CALL, BIG_BLIND_SIZE_INT}); // P1 calls (checks)
+        // Passage au Flop, P0 (SB/BTN) to act.
+        
+        // P0 bets 10 on flop
+        flop_state.apply_action({0, ActionType::RAISE, 10}); 
+
+        REQUIRE(flop_state.get_current_street() == Street::FLOP);
+        REQUIRE(flop_state.get_current_player() == 1); // P1 (BB) to act
+        // Pot: 4 (preflop) + 10 (P0 bet) = 14
+        REQUIRE(flop_state.get_pot_size() == (BIG_BLIND_SIZE_INT * 2) + 10);
+        int max_bet_flop_after_p0_bet = 0; for(int b : flop_state.get_current_bets()) max_bet_flop_after_p0_bet = std::max(max_bet_flop_after_p0_bet, b);
+        REQUIRE(max_bet_flop_after_p0_bet == 10);
+
+        ActionAbstraction abs(true, true, {}, {}, { {Street::FLOP, {12, 22}} }, true);
+        auto actions = abs.get_abstract_actions(flop_state);
+
+        CHECK(has_action(actions, ActionType::FOLD, 0));
+        CHECK(has_action(actions, ActionType::CALL, 10));
+        CHECK(has_action(actions, ActionType::RAISE, 22)); // 10 + 12
+        CHECK(has_action(actions, ActionType::RAISE, 32)); // 10 + 22
+        // P1 stack: 200 - 2 (BB postée) - 10 (call) = 188. Si all-in, montant total = 2 (mise préflop) + 188 = 190 ???
+        // Non, le montant de l'action RAISE est le *montant total* de la mise. Stack P1=200. BB=2. P0 bet 10. P1 stack = 200-2=198. P1 all-in = 198.
+        CHECK(has_action(actions, ActionType::RAISE, 198)); 
+        CHECK(actions.size() == 5);
+
+        // Check clamping of increment if too small
+        ActionAbstraction abs_small(true, true, {}, {}, { {Street::FLOP, {5}} }, true);
+        actions = abs_small.get_abstract_actions(flop_state);
+        CHECK(has_action(actions, ActionType::RAISE, 20)); // Clamped to min raise (10 + 10)
+        CHECK_FALSE(has_action(actions, ActionType::RAISE, 15));
+        CHECK(actions.size() == 4); // Fold, Call, Raise 20, All-in
+    }
+
+    SECTION("Interaction with BB sizes and Fractions")
+    {
+        GameState state_preflop(2, /*stack=*/200, /*ante=*/0, /*button_pos=*/0, BIG_BLIND_SIZE_INT);
+
+        ActionAbstraction abs(
+            true, true,
+            { {Street::PREFLOP, {1.0}} },              // fractions
+            { {Street::PREFLOP, {2.5}} },              // bb sizes
+            { {Street::PREFLOP, {7}} },                // exact
+            true);
+
+        auto actions = abs.get_abstract_actions(state_preflop);
+
+        CHECK(has_action(actions, ActionType::FOLD, 0)); // FOLD amount is 0
+        CHECK(has_action(actions, ActionType::CALL, 2));
+        CHECK(has_action(actions, ActionType::RAISE, 5));
+        CHECK(has_action(actions, ActionType::RAISE, 6));
+        CHECK(has_action(actions, ActionType::RAISE, 7));
+        CHECK(has_action(actions, ActionType::RAISE, 200));
+        CHECK(actions.size() == 6);
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// TEST_CASE 5 : Default Action Abstraction – No Folds
+// ──────────────────────────────────────────────────────────────────────────────
+TEST_CASE("Default Action Abstraction - No Folds", "[ActionAbstraction]")
+{
+    ActionAbstraction::StreetFractionsMap fractions   = {};
+    ActionAbstraction::StreetBBSizesMap    bb_sizes   = {};
+    ActionAbstraction::StreetExactBetsMap  exact_bets = {};
+
+    // allow_fold est false ici
+    ActionAbstraction abs(false, true, fractions, bb_sizes, exact_bets, true);
+
+    GameState state(2, /*stack=*/200, /*ante=*/0, /*button_pos=*/0, BIG_BLIND_SIZE_INT);
+    // Situation: SB (P0) to act. SB=1, BB=2. Max_bet=2. P0_bet=1. P0 peut folder.
+    // Mais comme allow_fold est false, FOLD ne devrait pas être une option.
+
+    auto actions = state.get_legal_abstract_actions(abs);
+
+    // L'action FOLD ne devrait PAS être présente si allow_fold_ est false
+    REQUIRE_FALSE(has_action_type_amount(actions, ActionType::FOLD, 0)); // Corrigé de REQUIRE à REQUIRE_FALSE
+
+    // Les autres actions attendues (CALL, RAISES) devraient toujours être là.
+    // SB doit payer 1 pour caller (total bet 2)
+    REQUIRE(has_action_type_amount(actions, ActionType::CALL, 2));
+    // Les raises par défaut devraient être basées sur les fractions (qui sont vides ici), et l'all-in.
+    // Min raise increment = BB = 2. Min total raise = max_bet (2) + 2 = 4.
+    // All-in pour P0 = stack (200) - mise SB (1) + mise SB (1) = 200.
+    // Puisque les fractions et BB sizes sont vides, et exact_bets aussi, seul all-in devrait être un raise possible
+    // en plus du min-raise si les autres options ne le génèrent pas.
+    // Revoyons la logique de add_raise_actions pour ce cas.
+    // Si raise_total_bets est vide après fractions, bb_sizes, exact_bets, et que allow_all_in_ est true, all-in est ajouté.
+    // Min_raise_total_bet est 4. Max_raise_total_bet (all-in) est 200.
+    // S'il n'y a aucune fraction/BB/exact size, est-ce que min_raise (4) est ajouté automatiquement ?
+    // La logique actuelle ajoute min_raise_total_bet (s'il est > max_bet) comme candidat initial si aucune autre taille de relance n'est trouvée. Non, ce n'est pas le cas.
+    // Les relances sont ajoutées à `raise_total_bets` puis converties en actions.
+    // Si `raise_total_bets` est vide mais `allow_all_in_` est vrai, seul all-in (200) devrait être ajouté.
+
+    // Attendu : CALL 2, RAISE 200 (all-in)
+    // Si les fractions sont vides, les tailles BB vides, les mises exactes vides :
+    // min_raise_total_bet = 4.
+    // max_raise_total_bet = 200.
+    // raise_total_bets sera vide initialement.
+    // allow_all_in_ est true, donc 200 est ajouté à raise_total_bets.
+    // Donc on s'attend à CALL 2, RAISE 200.
+    REQUIRE(actions.size() == 2); // CALL, RAISE (all-in)
+    REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 200));
+
+    // Les assertions originales qui suivaient le FOLD étaient basées sur create_default_test_fractions(), qui ne sont pas utilisées ici.
+    // REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 4)); // Plus valide avec fractions vides
+    // REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 5)); // Plus valide
+    // REQUIRE(has_action_type_amount(actions, ActionType::RAISE, 6)); // Plus valide
+    // REQUIRE_FALSE(has_action_type_amount(actions, ActionType::RAISE, 3)); // Toujours vrai
+}

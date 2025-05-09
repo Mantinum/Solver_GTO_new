@@ -8,6 +8,7 @@
 #include <exception> // Pour std::exception
 #include <sstream>   // Pour std::stringstream
 #include <iomanip>   // Pour std::setprecision
+#include <set>       // Pour std::set
 
 int main(int argc, char* argv[]) {
     // Configuration du logging (exemple: niveau info)
@@ -32,11 +33,39 @@ int main(int argc, char* argv[]) {
         // initial_state_template.print_state();
 
         // 2. Créer l'abstraction d'action
-        gto_solver::ActionAbstraction default_abstraction;
+        // Définition des fractions de pot par street
+        gto_solver::ActionAbstraction::StreetFractionsMap fractions = {
+            {gto_solver::Street::PREFLOP, {0.33, 0.5, 0.75, 1.0}},
+            {gto_solver::Street::FLOP, {0.33, 0.5, 0.75, 1.0}},
+            {gto_solver::Street::TURN, {0.5, 0.75, 1.0}},
+            {gto_solver::Street::RIVER, {0.5, 1.0, 1.5}}
+        };
+
+        // Définition des tailles de mise en BB par street
+        gto_solver::ActionAbstraction::StreetBBSizesMap bb_sizes = {
+            {gto_solver::Street::PREFLOP, {2.5, 3.0, 3.5}} // Pour les ouvertures
+            // Les autres streets peuvent être vides ou avoir leurs propres définitions
+        };
+
+        // Définition des mises exactes par street (NOUVEAU)
+        gto_solver::ActionAbstraction::StreetExactBetsMap exact_bets = {
+            {gto_solver::Street::FLOP, {100, 250}}, // Exemple: au flop, permettre des mises de 100 ou 250
+            {gto_solver::Street::RIVER, {500}}      // Exemple: au river, permettre une mise de 500
+        };
+
+        // Création de l'objet ActionAbstraction
+        gto_solver::ActionAbstraction action_abstraction(
+            true, // allow_fold
+            true, // allow_check_call
+            fractions, 
+            bb_sizes,
+            exact_bets, // Nouveau paramètre
+            true  // allow_all_in
+        );
         spdlog::info("Abstraction d'actions par défaut créée.");
 
         // 3. Initialiser le moteur CFR
-        gto_solver::CFREngine engine(default_abstraction);
+        gto_solver::CFREngine engine(action_abstraction);
         spdlog::info("Moteur CFR initialisé.");
 
         // 4. Essayer de charger la map d'infosets

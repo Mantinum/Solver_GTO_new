@@ -4,16 +4,22 @@
 #include <vector>
 #include <string>
 #include <set> // Pour stocker les fractions de pot uniques
+#include <map> // Ajout pour map Street -> fractions
 #include <algorithm> // Pour std::max
 #include <cmath> // Pour std::round
 #include <stdexcept> // Pour std::logic_error
+// #include "gto/game_state.h" // <- SUPPRIMER l'include pour casser le cycle
 // Inclure d'autres dépendances nécessaires, par ex. game_state.h si ActionSpec l'utilise
 // #include "gto/game_state.h"
 
 namespace gto_solver {
 
-// Forward declaration pour éviter inclusion circulaire si Action a besoin de GameState
-class GameState; 
+// Déclarations anticipées pour casser le cycle d'inclusion
+class GameState;
+enum class Street; // Ok pour enum class
+
+// Forward declaration plus nécessaire car on inclut game_state.h
+// class GameState; 
 
 // Types d'action possibles (correspond à ce qui était utilisé implicitement)
 enum class ActionType {
@@ -48,11 +54,19 @@ struct Action {
 // Classe pour définir et appliquer une abstraction d'actions
 class ActionAbstraction {
 public:
+    // Type alias pour la configuration des fractions
+    using StreetFractionsMap = std::map<Street, std::set<double>>;
+    // Type alias pour la configuration des tailles de relance en BBs
+    using StreetBBSizesMap = std::map<Street, std::set<double>>;
+    using StreetExactBetsMap = std::map<Street, std::set<int>>; // Nouveau type
+
     // Constructeur avec un schéma d'abstraction par défaut ou configurable
     ActionAbstraction(
         bool allow_fold = true,
         bool allow_check_call = true,
-        const std::set<double>& raise_fractions = {0.33, 0.5, 0.75, 1.0}, // Ex: 33%, 50%, 75%, 100% pot
+        const StreetFractionsMap& fractions_by_street = {}, 
+        const StreetBBSizesMap& bb_sizes_by_street = {},
+        const StreetExactBetsMap& exact_bets_by_street = {}, // Nouveau paramètre
         bool allow_all_in = true
     );
 
@@ -68,7 +82,10 @@ public:
 private:
     bool allow_fold_;
     bool allow_check_call_;
-    std::set<double> raise_pot_fractions_; // Fractions du pot pour les relances
+    // Modification: Map Street -> set<double>
+    StreetFractionsMap fractions_by_street_; 
+    StreetBBSizesMap bb_sizes_by_street_;
+    StreetExactBetsMap exact_bets_by_street_; // Nouveau membre
     bool allow_all_in_;
 
     // Méthodes helper (privées)
