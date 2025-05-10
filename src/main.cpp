@@ -2,131 +2,146 @@
 #include "gto/action_abstraction.h"
 #include "gto/cfr_engine.h"
 #include "spdlog/spdlog.h"
-#include <iostream> // Pour std::cerr
-#include <string>   // Pour std::string
-#include <vector>   // Pour std::vector
-#include <exception> // Pour std::exception
-#include <sstream>   // Pour std::stringstream
-#include <iomanip>   // Pour std::setprecision
-#include <set>       // Pour std::set
 
-int main(int argc, char* argv[]) {
-    // Configuration du logging (exemple: niveau info)
+#include <iostream>   // std::cerr
+#include <string>     // std::string
+#include <vector>     // std::vector
+#include <exception>  // std::exception
+#include <sstream>    // std::stringstream
+#include <iomanip>    // std::setprecision
+#include <set>        // std::set
+
+int main(int /*argc*/, char* /*argv*/[])
+{
+    // ─────────────────────────────────────────────────────────────
+    // Logging
+    // ─────────────────────────────────────────────────────────────
     spdlog::set_level(spdlog::level::info);
-    // Mettre spdlog::level::debug ou spdlog::level::trace pour plus de détails
-    spdlog::info("Démarrage du solveur GTO...");
+    spdlog::info("Démarrage du solveur GTO…");
 
-    // Paramètres du jeu (exemple)
-    int num_players = 2;
-    int initial_stack = 200; // Exemple, ajuster si besoin
-    int ante = 0;
-    int button_pos = 0;
-    int num_iterations = 5; // GARDER BAS POUR LES TESTS DE SAVE/LOAD
-    const std::string infoset_map_filename = "infoset_map.dat"; // Nom du fichier
-    int big_blind = 2; // Définir la taille de la Big Blind ici
+    // ─────────────────────────────────────────────────────────────
+    // Paramètres généraux
+    // ─────────────────────────────────────────────────────────────
+    const int         num_players      = 2;
+    const int         initial_stack    = 200;
+    const int         ante             = 0;
+    const int         button_pos       = 0;
+    const int         big_blind        = 2;
+    const int         num_iterations   = 4;            // Valeur basse pour test
+    const std::string infoset_filename = "infoset_map.dat";
 
-    try {
-        // 1. Créer l'état de jeu initial (template)
-        gto_solver::GameState initial_state_template(num_players, initial_stack, ante, button_pos, big_blind);
+    try
+    {
+        // 1. État de jeu « template »
+        gto_solver::GameState initial_state_template(
+            num_players, initial_stack, ante, button_pos, big_blind);
         spdlog::info("État de jeu initial (template) créé.");
-        // Afficher l'état initial peut être verbeux, on peut le commenter si besoin
-        // initial_state_template.print_state();
 
-        // 2. Créer l'abstraction d'action
-        // Définition des fractions de pot par street
+        // 2. Créer l’abstraction d’action (configuration enrichie)
+        // --------------------------------------------------------
+
+        // Fractions de pot par street
         gto_solver::ActionAbstraction::StreetFractionsMap fractions = {
-            {gto_solver::Street::PREFLOP, {0.33, 0.5, 0.75, 1.0}},
-            {gto_solver::Street::FLOP, {0.33, 0.5, 0.75, 1.0}},
-            {gto_solver::Street::TURN, {0.5, 0.75, 1.0}},
-            {gto_solver::Street::RIVER, {0.5, 1.0, 1.5}}
+            {gto_solver::Street::PREFLOP, {0.5, 0.75, 1.0, 1.25}},
+            {gto_solver::Street::FLOP,    {0.25, 0.33, 0.5, 0.66, 0.75, 1.0, 1.25, 1.5}},
+            {gto_solver::Street::TURN,    {0.33, 0.5, 0.66, 0.75, 1.0, 1.25, 1.5, 2.0}},
+            {gto_solver::Street::RIVER,   {0.33, 0.5, 0.75, 1.0, 1.5, 2.0, 2.5}}
         };
 
-        // Définition des tailles de mise en BB par street
+        // Tailles en BB par street
         gto_solver::ActionAbstraction::StreetBBSizesMap bb_sizes = {
-            {gto_solver::Street::PREFLOP, {2.5, 3.0, 3.5}} // Pour les ouvertures
-            // Les autres streets peuvent être vides ou avoir leurs propres définitions
+            {gto_solver::Street::PREFLOP, {2.2, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0}},
+            {gto_solver::Street::FLOP,    {1.0, 1.5, 2.0}},
+            {gto_solver::Street::TURN,    {1.5, 2.0, 2.5}},
+            {gto_solver::Street::RIVER,   {2.0, 2.5, 3.0}}
         };
 
-        // Définition des mises exactes par street (NOUVEAU)
+        // Mises exactes par street
         gto_solver::ActionAbstraction::StreetExactBetsMap exact_bets = {
-            {gto_solver::Street::FLOP, {100, 250}}, // Exemple: au flop, permettre des mises de 100 ou 250
-            {gto_solver::Street::RIVER, {500}}      // Exemple: au river, permettre une mise de 500
+            {gto_solver::Street::FLOP,  {5, 8, 10, 12, 15, 20, 25, 30}},
+            {gto_solver::Street::TURN,  {10, 15, 20, 25, 30, 40, 50}},
+            {gto_solver::Street::RIVER, {20, 30, 40, 50, 75, 100}}
         };
 
-        // Création de l'objet ActionAbstraction
-        gto_solver::ActionAbstraction action_abstraction(
-            true, // allow_fold
-            true, // allow_check_call
-            fractions, 
+        gto_solver::ActionAbstraction abstraction(
+            /*allow_folds*/       true,
+            /*allow_check_call*/  true,
+            fractions,
             bb_sizes,
-            exact_bets, // Nouveau paramètre
-            true  // allow_all_in
-        );
-        spdlog::info("Abstraction d'actions par défaut créée.");
+            exact_bets,
+            /*allow_all_in*/      true);
+
+        spdlog::info("Abstraction d’actions enrichie créée.");
 
         // 3. Initialiser le moteur CFR
-        gto_solver::CFREngine engine(action_abstraction);
+        gto_solver::CFREngine engine(abstraction);
         spdlog::info("Moteur CFR initialisé.");
 
-        // 4. Essayer de charger la map d'infosets
-        if (engine.load_infoset_map(infoset_map_filename)) {
-            spdlog::info("Map d'infosets chargée avec succès depuis {}. Nombre d'infosets chargés: {}",
-                         infoset_map_filename, engine.get_infoset_map().size());
-        } else {
-            spdlog::info("Aucune map d'infosets existante trouvée ({}) ou erreur de chargement. Démarrage d'un nouvel entraînement.", infoset_map_filename);
-        }
-        spdlog::info("Nombre d'infosets avant entraînement: {}", engine.get_infoset_map().size());
+        // 4. Charger une éventuelle map d’infosets
+        if (engine.load_infoset_map(infoset_filename))
+            spdlog::info("Infosets chargés depuis {} ({} entrées).",
+                         infoset_filename, engine.get_infoset_map().size());
+        else
+            spdlog::info("Pas de map d’infosets existante ({}) – nouvel entraînement.",
+                         infoset_filename);
 
-        // 5. Lancer les itérations CFR
-        spdlog::info("Lancement de {} itérations CFR...", num_iterations);
+        // 5. Exécuter les itérations CFR
+        spdlog::info("Lancement de {} itérations CFR…", num_iterations);
         engine.run_iterations(num_iterations, initial_state_template);
-        spdlog::info("Fin de l'entraînement CFR.");
+        spdlog::info("Entraînement CFR terminé.");
 
-        // 6. Sauvegarder la map d'infosets mise à jour
-        spdlog::info("Nombre d'infosets après entraînement: {}", engine.get_infoset_map().size());
-        if (engine.get_infoset_map().empty()) {
-             spdlog::warn("La map d'infosets est vide, sauvegarde annulée.");
-        } else if (engine.save_infoset_map(infoset_map_filename)) {
-            spdlog::info("Map d'infosets sauvegardée avec succès dans {}.", infoset_map_filename);
-        } else {
-            spdlog::error("Échec de la sauvegarde de la map d'infosets dans {}.", infoset_map_filename);
+        // 6. Sauvegarder la map d’infosets
+        spdlog::info("Infosets après entraînement : {}",
+                     engine.get_infoset_map().size());
+
+        if (engine.get_infoset_map().empty())
+        {
+            spdlog::warn("Map d’infosets vide ; sauvegarde annulée.");
+        }
+        else if (engine.save_infoset_map(infoset_filename))
+        {
+            spdlog::info("Map d’infosets sauvegardée dans {}.",
+                         infoset_filename);
+        }
+        else
+        {
+            spdlog::error("Échec de la sauvegarde de {}.", infoset_filename);
         }
 
-        // 7. Afficher quelques résultats (Optionnel)
-        spdlog::info("Affichage de quelques stratégies (si des infosets existent) :");
-        int count = 0;
-        for (const auto& pair : engine.get_infoset_map()) {
-            if (count >= 5) break; // Limiter l'affichage
-            const std::string& key = pair.first;
-            const auto& avg_strategy = engine.get_average_strategy(key);
-            std::stringstream ss_strat;
-             ss_strat << std::fixed << std::setprecision(3); // Appliquer la précision au stream
-            for(size_t i = 0; i < avg_strategy.size(); ++i) {
-                ss_strat << "A" << i << ":" << avg_strategy[i] << (i == avg_strategy.size() - 1 ? "" : " ");
-            }
-            // Tronquer la clé si elle est trop longue pour l'affichage
-            std::string truncated_key = key;
-            if (truncated_key.length() > 60) {
-                 truncated_key = truncated_key.substr(0, 57) + "...";
-            }
-            spdlog::info("  Infoset [{}]: Visites={}, Stratégie Avg: {}", truncated_key, pair.second.visit_count, ss_strat.str());
-            count++;
-        }
-        if (engine.get_infoset_map().size() > count) {
-            spdlog::info("... et {} autres infosets.", engine.get_infoset_map().size() - count);
-        }
+        // 7. Afficher quelques infosets (optionnel)
+        spdlog::info("Aperçu de stratégies :");
+        int shown = 0;
+        for (const auto& [key, node] : engine.get_infoset_map())
+        {
+            if (shown >= 5) break;
+            const auto& strat = engine.get_average_strategy(key);
 
-    } catch (const std::exception& e) {
-        spdlog::critical("Erreur critique: {}", e.what());
-        // Afficher sur cerr aussi au cas où spdlog ne fonctionne pas
-        std::cerr << "Erreur critique: " << e.what() << std::endl;
-        return 1;
-    } catch (...) {
-         spdlog::critical("Erreur critique inconnue interceptée.");
-         std::cerr << "Erreur critique inconnue interceptée." << std::endl;
-         return 1;
+            std::stringstream ss; ss << std::fixed << std::setprecision(3);
+            for (size_t i = 0; i < strat.size(); ++i)
+                ss << "A" << i << ':' << strat[i]
+                   << (i + 1 == strat.size() ? "" : " ");
+
+            std::string k = key.size() > 60 ? key.substr(0, 57) + "…" : key;
+            spdlog::info("  [{}] Visites={}  AvgStrat: {}", k,
+                         node.visit_count, ss.str());
+            ++shown;
+        }
+        if (engine.get_infoset_map().size() > shown)
+            spdlog::info("… et {} autres infosets.",
+                         engine.get_infoset_map().size() - shown);
     }
-
+    catch (const std::exception& e)
+    {
+        spdlog::critical("Erreur critique : {}", e.what());
+        std::cerr << "Erreur critique : " << e.what() << '\n';
+        return 1;
+    }
+    catch (...)
+    {
+        spdlog::critical("Erreur critique inconnue interceptée.");
+        std::cerr << "Erreur critique inconnue interceptée.\n";
+        return 1;
+    }
 
     spdlog::info("Exécution terminée.");
     return 0;
