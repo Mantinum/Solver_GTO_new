@@ -28,6 +28,15 @@ public:
     bool save_infoset_map(const std::string& filename) const;
     bool load_infoset_map(const std::string& filename);
 
+    // Méthode helper pour la réalisation d'équité (mise en public pour tests)
+    double calculate_equity(
+        const std::vector<Card>& p0_hand,
+        const std::vector<Card>& p1_hand,
+        const std::vector<Card>& current_board_cards,
+        const std::vector<Card>& remaining_deck_cards,
+        int pot_size
+    );
+
 private:
     // Méthode CFR récursive principale.
     // player_reach_probs: vecteur des probabilités que chaque joueur atteigne cet état.
@@ -35,6 +44,10 @@ private:
     // Returns: La valeur (EV) de l'état pour le joueur dont c'est le tour.
     double cfr_traverse(GameState current_state, std::vector<double>& player_reach_probs, int iteration_num);
 
+    // Méthodes helper pour CFR (à définir)
+    InformationSet& get_or_create_infoset_node(const std::string& infoset_key, int num_actions);
+
+protected:
     InformationSetMap infoset_map_;
     const ActionAbstraction& action_abstraction_; // Référence à une abstraction constante
 

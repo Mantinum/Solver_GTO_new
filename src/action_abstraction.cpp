@@ -17,74 +17,91 @@ namespace gto_solver {
 ActionAbstraction::ActionAbstraction(
     bool allow_fold,
     bool allow_check_call,
-    const StreetFractionsMap& fractions_by_street,
-    const StreetBBSizesMap& bb_sizes_by_street,
-    const StreetExactBetsMap& exact_bets_by_street,
+    const StreetPositionFractionsMap& fractions_by_street_position,
+    const StreetPositionBBSizesMap& bb_sizes_by_street_position,
+    const StreetPositionExactBetsMap& exact_bets_by_street_position,
     bool allow_all_in)
     : allow_fold_(allow_fold),
       allow_check_call_(allow_check_call),
-      fractions_by_street_(fractions_by_street),
-      bb_sizes_by_street_(bb_sizes_by_street),
-      exact_bets_by_street_(exact_bets_by_street),
+      fractions_by_street_position_(fractions_by_street_position),
+      bb_sizes_by_street_position_(bb_sizes_by_street_position),
+      exact_bets_by_street_position_(exact_bets_by_street_position),
       allow_all_in_(allow_all_in)
 {
-    // Validation pour fractions_by_street_
-    for(const auto& pair : fractions_by_street_) {
-        const Street street = pair.first;
-        const std::set<double>& fractions = pair.second;
-        for(double frac : fractions) {
-            if (frac <= 0.0) {
-                 spdlog::warn("ActionAbstraction: Pour street {}, raise fraction {} <= 0 sera ignorée.", 
-                              street_to_string(street), // Assumer street_to_string existe
-                              frac);
-            }
-        }
-    }
-    // Validation pour bb_sizes_by_street_
-    for(const auto& pair : bb_sizes_by_street_) {
-        const Street street = pair.first;
-        const std::set<double>& bb_sizes = pair.second;
-        for(double bb_size_multiplier : bb_sizes) {
-            if (bb_size_multiplier <= 0.0) {
-                 spdlog::warn("ActionAbstraction: Pour street {}, multiplicateur BB {} <= 0 sera ignoré.", 
-                              street_to_string(street), bb_size_multiplier);
-            }
-        }
-    }
-    for (const auto& pair : bb_sizes_by_street_) {
-        for (double bb_mult : pair.second) {
-            if (bb_mult <= 0) {
-                spdlog::warn("ActionAbstraction: BB multiplier must be positive: {}", bb_mult);
-                // On pourrait lancer une exception ici si on veut être plus strict
-            }
-        }
-    }
-    for (const auto& pair : exact_bets_by_street_) {
-        for (int exact_bet : pair.second) {
-            if (exact_bet <= 0) {
-                spdlog::warn("ActionAbstraction: Exact bet amount must be positive: {}", exact_bet);
-                // On pourrait lancer une exception ici si on veut être plus strict
+    // Validation des fractions par position
+    for (const auto& street_pair : fractions_by_street_position_) {
+        const Street street = street_pair.first;
+        for (const auto& pos_pair : street_pair.second) {
+            const Position pos = pos_pair.first;
+            for (double frac : pos_pair.second) {
+                if (frac <= 0.0) {
+                    spdlog::debug("ActionAbstraction: Pour street {} position {}, raise fraction {} <= 0 sera ignorée.",
+                                street_to_string(street),
+                                position_to_string(pos),
+                                frac);
+                }
             }
         }
     }
 
-    // Vérifier si TOUTES les streets ont des fractions vides ET que all-in est interdit
-    bool any_raise_option = allow_all_in_;
-    if (!any_raise_option) {
-        for(const auto& pair : fractions_by_street_) {
-            if (!pair.second.empty()) {
-                any_raise_option = true;
-                break;
+    // Validation des tailles BB par position
+    for (const auto& street_pair : bb_sizes_by_street_position_) {
+        const Street street = street_pair.first;
+        for (const auto& pos_pair : street_pair.second) {
+            const Position pos = pos_pair.first;
+            for (double bb_size : pos_pair.second) {
+                if (bb_size <= 0.0) {
+                    spdlog::debug("ActionAbstraction: Pour street {} position {}, BB size {} <= 0 sera ignoré.",
+                                street_to_string(street),
+                                position_to_string(pos),
+                                bb_size);
+                }
             }
         }
     }
+
+    // Validation des mises exactes par position
+    for (const auto& street_pair : exact_bets_by_street_position_) {
+        const Street street = street_pair.first;
+        for (const auto& pos_pair : street_pair.second) {
+            const Position pos = pos_pair.first;
+            for (int bet : pos_pair.second) {
+                if (bet <= 0) {
+                    spdlog::debug("ActionAbstraction: Pour street {} position {}, exact bet {} <= 0 sera ignoré.",
+                                street_to_string(street),
+                                position_to_string(pos),
+                                bet);
+                }
+            }
+        }
+    }
+
+    // Vérifier si des options de relance sont disponibles
+    bool any_raise_option = allow_all_in_;
     if (!any_raise_option) {
-        for(const auto& pair : bb_sizes_by_street_) {
-            if (!pair.second.empty()) { any_raise_option = true; break; }
+        for (const auto& street_pair : fractions_by_street_position_) {
+            for (const auto& pos_pair : street_pair.second) {
+                if (!pos_pair.second.empty()) {
+                    any_raise_option = true;
+                    break;
+                }
+            }
+            if (any_raise_option) break;
         }
     }
     if (!any_raise_option) {
-         spdlog::warn("ActionAbstraction: Aucune taille de relance spécifiée (ni fractions, ni tailles BB, ni all-in).");
+        for (const auto& street_pair : bb_sizes_by_street_position_) {
+            for (const auto& pos_pair : street_pair.second) {
+                if (!pos_pair.second.empty()) {
+                    any_raise_option = true;
+                    break;
+                }
+            }
+            if (any_raise_option) break;
+        }
+    }
+    if (!any_raise_option) {
+        spdlog::warn("ActionAbstraction: Aucune taille de relance spécifiée (ni fractions, ni tailles BB, ni all-in).");
     }
 }
 
@@ -99,45 +116,43 @@ std::vector<Action> ActionAbstraction::get_abstract_actions(const GameState& sta
     }
 
     // Si le joueur est foldé ou n'a plus de stack (et pas de mise devant lui ?) -> il ne peut rien faire
-    // Note: Un joueur all-in ne devrait pas être interrogé pour une action. GameState gère ça ?
-     if (state.is_player_folded(current_player)) {
-         spdlog::trace("ActionAbstraction::get_abstract_actions: Pas d'actions pour P{} car déjà foldé.", current_player);
-         return actions;
-     }
-     // Attention: un joueur avec stack 0 mais une mise devant lui DOIT pouvoir agir si relancé.
-     // La logique dans les helpers devrait gérer ça (ex: peut seulement call 0 ou fold).
-
+    if (state.is_player_folded(current_player)) {
+        spdlog::trace("ActionAbstraction::get_abstract_actions: Pas d'actions pour P{} car déjà foldé.", current_player);
+        return actions;
+    }
 
     // 1. Action FOLD (si autorisée)
-    add_fold_action(actions, state);
+    if (allow_fold_) {
+        add_fold_action(actions, state);
+    }
 
     // 2. Action CHECK/CALL (si autorisée)
-    add_check_call_action(actions, state);
+    if (allow_check_call_) {
+        add_check_call_action(actions, state);
+    }
 
     // 3. Actions RAISE (si autorisées et possibles)
     add_raise_actions(actions, state);
 
     // Validation finale : au moins une action devrait être possible si le joueur n'est pas all-in ou foldé
-    // (au pire, check ou fold)
     if (actions.empty() && state.get_player_stack(current_player) > 0) {
-         spdlog::warn("ActionAbstraction::get_abstract_actions: Aucune action générée pour P{} actif avec stack > 0. State:\n{}", current_player, state.toString());
-         // On pourrait forcer un check/fold ici comme fallback ?
-         // Par sécurité, ajoutons au moins un check/call si possible
-         if (allow_check_call_) {
-             add_check_call_action(actions, state); // Réessayer au cas où
-         }
-         if(actions.empty() && allow_fold_) {
-             int max_bet = 0; for (int b : state.get_current_bets()) max_bet = std::max(max_bet, b);
-             if(state.get_current_bets()[current_player] < max_bet) { // Peut folder
+        spdlog::warn("ActionAbstraction::get_abstract_actions: Aucune action générée pour P{} actif avec stack > 0. State:\n{}", current_player, state.toString());
+        // On pourrait forcer un check/fold ici comme fallback ?
+        // Par sécurité, ajoutons au moins un check/call si possible
+        if (allow_check_call_) {
+            add_check_call_action(actions, state); // Réessayer au cas où
+        }
+        if(actions.empty() && allow_fold_) {
+            int max_bet = 0; for (int b : state.get_current_bets()) max_bet = std::max(max_bet, b);
+            if(state.get_current_bets()[current_player] < max_bet) { // Peut folder
                 add_fold_action(actions, state);
-             }
-         }
-         if (actions.empty()) {
-             spdlog::error("ActionAbstraction::get_abstract_actions: Toujours aucune action pour P{} actif! Forcing FOLD.", current_player);
-             actions.push_back({current_player, ActionType::FOLD, 0}); // Fallback ultime
-         }
+            }
+        }
+        if (actions.empty()) {
+            spdlog::error("ActionAbstraction::get_abstract_actions: Toujours aucune action pour P{} actif! Forcing FOLD.", current_player);
+            actions.push_back({current_player, ActionType::FOLD, 0}); // Fallback ultime
+        }
     }
-
 
     spdlog::trace("ActionAbstraction::get_abstract_actions: Actions générées pour P{}: {}", current_player, actions.size());
     return actions;
@@ -145,20 +160,27 @@ std::vector<Action> ActionAbstraction::get_abstract_actions(const GameState& sta
 
 // --- Méthodes Helper Privées ---
 
+Position ActionAbstraction::get_effective_position(const GameState& state) const {
+    Position pos = state.get_player_position(state.get_current_player());
+    if (state.get_num_players() == 2 && pos == Position::SB) {
+        return Position::BTN;
+    }
+    return pos;
+}
+
 void ActionAbstraction::add_fold_action(std::vector<Action>& actions, const GameState& state) const {
     if (!allow_fold_) return;
 
     int current_player = state.get_current_player();
-    int player_bet = state.get_current_bets().at(current_player); // Utiliser .at() pour bounds checking
+    int player_bet = state.get_current_bets().at(current_player);
     int max_bet = 0;
     for (int bet : state.get_current_bets()) {
         max_bet = std::max(max_bet, bet);
     }
 
     // On ne peut folder que s'il y a une mise à suivre (max_bet > player_bet)
-    // Si max_bet == player_bet, l'action légale est CHECK (géré par add_check_call_action)
     if (player_bet < max_bet) {
-        actions.push_back({current_player, ActionType::FOLD, 0}); // Montant 0 pour FOLD
+        actions.push_back({current_player, ActionType::FOLD, 0});
         spdlog::trace("ActionAbstraction: FOLD ajouté pour P{}", current_player);
     }
 }
@@ -176,229 +198,253 @@ void ActionAbstraction::add_check_call_action(std::vector<Action>& actions, cons
     int amount_to_call = max_bet - player_bet;
 
     // Vérifier si le joueur PEUT payer le call (même si c'est all-in)
-    // Note: amount_to_call peut être 0 (check)
-    if (amount_to_call < 0) {
-        // Ne devrait jamais arriver si la logique de GameState est correcte
-        spdlog::error("ActionAbstraction::add_check_call_action: amount_to_call négatif ({}) pour P{}. State:\n{}", amount_to_call, current_player, state.toString());
-        amount_to_call = 0; // Sécurité
-    }
-
-    // L'action est possible même si stack == 0, si amount_to_call == 0 (check)
-    // Si amount_to_call > 0, il faut avoir du stack pour call (même si c'est pour call all-in)
-    if (amount_to_call == 0 || player_stack > 0) {
-        // Montant réellement ajouté au pot par cette action
-        int call_amount_added = std::min(player_stack, amount_to_call);
-        // Montant total misé par le joueur APRES cette action
-        int total_bet_after_action = player_bet + call_amount_added;
-
-        actions.push_back({current_player, ActionType::CALL, total_bet_after_action});
-
-        if (amount_to_call == 0) {
-            spdlog::trace("ActionAbstraction: CHECK (Call 0 -> total bet {}) ajouté pour P{}", total_bet_after_action, current_player);
-        } else {
-             if (call_amount_added == player_stack && call_amount_added < amount_to_call) {
-                 spdlog::trace("ActionAbstraction: CALL All-in {} (total bet {}) ajouté pour P{}", call_amount_added, total_bet_after_action, current_player);
-             } else {
-                 spdlog::trace("ActionAbstraction: CALL {} (total bet {}) ajouté pour P{}", call_amount_added, total_bet_after_action, current_player);
-             }
-        }
-    } else {
-         spdlog::trace("ActionAbstraction: Cannot CHECK/CALL for P{} (stack={}, amount_to_call={})", current_player, player_stack, amount_to_call);
+    if (amount_to_call <= player_stack) {
+        actions.push_back({current_player, ActionType::CALL, max_bet});
+        spdlog::trace("ActionAbstraction: CALL/CHECK ajouté pour P{} (montant: {})", current_player, max_bet);
     }
 }
 
 void ActionAbstraction::add_raise_actions(std::vector<Action>& actions, const GameState& state) const {
     int current_player = state.get_current_player();
     int player_stack = state.get_player_stack(current_player);
-
-    // On ne peut pas relancer si on n'a pas de stack
-    if (player_stack <= 0) {
-        return;
-    }
-
     int player_bet = state.get_current_bets().at(current_player);
-    int pot_size = state.get_pot_size(); // Pot *avant* l'action du joueur courant
-    int last_raise_size = state.get_last_raise_size(); // Taille de l'incrément de la *dernière* relance
-    int max_bet = 0; // Mise la plus haute sur la table actuellement
+    int max_bet = 0;
     for (int bet : state.get_current_bets()) {
         max_bet = std::max(max_bet, bet);
     }
-    int amount_to_call = max_bet - player_bet;
 
-    // Stack effectif pour la relance = ce qui reste APRES avoir égalisé la mise max
-    int effective_stack_for_raise = player_stack - amount_to_call;
-    // On ne peut relancer que si on a quelque chose à ajouter APRÈS avoir call
-    if (effective_stack_for_raise <= 0) {
-         spdlog::trace("ActionAbstraction: Cannot RAISE for P{} (stack={}, amount_to_call={}), no effective stack.", current_player, player_stack, amount_to_call);
-        return;
-    }
+    if (player_stack <= 0) return;
 
-    // Pot size *après* que le joueur courant ait call (base pour les sizings pot%)
-    // Le pot contient déjà les mises précédentes. Il faut ajouter le call du joueur courant.
-    int pot_if_player_calls = pot_size + amount_to_call;
+    int min_raise_size = calculate_min_raise_size(state);
+    int pot_size = calculate_pot_size(state);
+    Position effective_pos = get_effective_position(state);
 
-    // Calcul du min raise (selon les règles du poker)
-    // L'incrément minimum est la taille de la dernière relance, mais au moins 1 BB.
-    int current_bb_size = state.get_big_blind_size();
-    if (current_bb_size <= 0) { // Sécurité si la BB n'est pas définie ou est invalide
-        spdlog::error("ActionAbstraction::add_raise_actions: Big Blind size est <= 0 ({}) depuis GameState. Utilisation fallback à 1.", current_bb_size);
-        current_bb_size = 1; // Fallback très conservateur
-    }
-    int min_raise_increment = std::max(last_raise_size, current_bb_size);
+    spdlog::trace("ActionAbstraction: P{} en position effective {} (street: {})",
+                  current_player, 
+                  position_to_string(effective_pos),
+                  street_to_string(state.get_current_street()));
+    spdlog::trace("ActionAbstraction: player_bet={}, max_bet={}, min_raise_size={}, BB={}",
+                  player_bet, max_bet, min_raise_size, state.get_big_blind_size());
 
-    // Le montant *total* de la mise minimale après relance
-    int min_raise_total_bet = max_bet + min_raise_increment;
+    std::set<int> raise_targets; // Pour éviter les doublons
 
-    // Calcul du max raise (All-in)
-    // Le montant total de la mise après all-in
-    int max_raise_total_bet = player_bet + player_stack; // Mise courante + tout le stack restant
+    // Tailles de mise en BB
+    auto bb_multipliers = get_bb_sizes_for_position(state);
+    spdlog::trace("ActionAbstraction: Tailles BB (multiplicateurs) disponibles pour P{}: {}", current_player, bb_multipliers.size());
 
-    // --- Déterminer si c'est une opportunité d'"ouvrir" le pot ---
-    bool is_open_opportunity = false;
-    if (state.get_current_street() == Street::PREFLOP) {
-        // Preflop, c'est une "open opportunity" si la mise max actuelle est juste la BB
-        // ET que la "dernière relance" était la BB elle-même (ou moins, e.g. SB limp)
-        // Cela couvre le cas UTG qui ouvre, ou SB qui open-raise par-dessus BB.
-        if (max_bet == current_bb_size && last_raise_size <= current_bb_size) {
-            is_open_opportunity = true;
+    // Déterminer si c'est une situation d'open (ou premier bet sur une street)
+    // vs. une situation de reraise.
+    bool is_open_situation = (state.get_current_street() != Street::PREFLOP && max_bet == 0) || 
+                             (max_bet <= state.get_big_blind_size());
+
+    spdlog::trace("ActionAbstraction: is_open_situation pour BB sizes = {} (max_bet={}, street={})",
+                  is_open_situation, max_bet, street_to_string(state.get_current_street()));
+
+    for (double bb_mult : bb_multipliers) {
+        if (bb_mult <= 0) continue;
+        int target = 0;
+        int raise_increment_if_applicable = 0;
+
+        if (is_open_situation) { // bb_mult définit la MISE TOTALE CIBLE
+            target = static_cast<int>(std::round(state.get_big_blind_size() * bb_mult));
+            raise_increment_if_applicable = target - max_bet; 
+            // Pour un open, player_bet est la blind postée, max_bet est la BB.
+            // L'incrément est par rapport à max_bet.
+        } else { // bb_mult définit un INCRÉMENT de relance (X BBs à ajouter à max_bet)
+            raise_increment_if_applicable = static_cast<int>(std::round(state.get_big_blind_size() * bb_mult));
+            target = max_bet + raise_increment_if_applicable;
         }
-    } else { // Postflop
-        if (max_bet == 0) {
-            is_open_opportunity = true;
-        }
-    }
-    if (is_open_opportunity) {
-        spdlog::trace("ActionAbstraction: Situation d'ouverture détectée pour P{}", current_player);
-    }
 
-    // --- Cas Spécial : Min Raise force All-in ---
-    // Si la mise minimale requise est déjà égale ou supérieure à un all-in,
-    // la seule "relance" possible est all-in.
-    if (min_raise_total_bet >= max_raise_total_bet) {
-        if (allow_all_in_) {
-            // S'assurer que cet all-in est bien *supérieur* à un simple call.
-            // (On ne propose pas "Raise All-in" si ça revient juste à caller)
-            if (max_raise_total_bet > max_bet) {
-                 actions.push_back({current_player, ActionType::RAISE, max_raise_total_bet});
-                 spdlog::trace("ActionAbstraction: RAISE (All-in {}) ajouté pour P{} (seule option car min_raise >= all_in)", max_raise_total_bet, current_player);
-            } else {
-                 spdlog::trace("ActionAbstraction: All-in ({}) pour P{} est <= max_bet ({}), pas ajouté comme RAISE.", max_raise_total_bet, current_player, max_bet);
-            }
+        spdlog::trace("ActionAbstraction: bb_mult={}, target={}, raise_increment_if_applicable={}", bb_mult, target, raise_increment_if_applicable);
+
+        int raise_target_for_player = target - player_bet;
+
+        if (raise_target_for_player > 0 && raise_target_for_player <= player_stack) {
+            spdlog::trace("ActionAbstraction: Ajout RAISE (BB mult: {}) target: {} pour P{}", bb_mult, target, current_player);
+            raise_targets.insert(target);
         } else {
-            spdlog::trace("ActionAbstraction: Min raise ({}) >= All-in ({}) mais All-in non autorisé pour P{}", min_raise_total_bet, max_raise_total_bet, current_player);
+            spdlog::trace("ActionAbstraction: RAISE (BB mult: {}) target: {} pour P{} ignoré (target_for_player={}, stack={})",
+                          bb_mult, target, current_player, raise_target_for_player, player_stack);
         }
-        return; // Aucune autre taille de relance n'est possible
     }
 
-    std::set<int> raise_total_bets;
-    Street current_street = state.get_current_street();
+    // Fractions de pot
+    double base_pot_for_fraction_calc = static_cast<double>(state.get_pot_size()); // Pot total actuel (inclut les mises de cette street)
+    auto fractions = get_fractions_for_position(state);
+    spdlog::trace("ActionAbstraction: Fractions de pot disponibles pour P{}: {}", current_player, fractions.size());
 
-    // 1. Ajouter les relances basées sur les fractions du pot
-    const auto it_frac = fractions_by_street_.find(current_street);
-    if (it_frac != fractions_by_street_.end()) {
-        const std::set<double>& fracs = it_frac->second;
-        if (!fracs.empty()) {
-            spdlog::trace("ActionAbstraction: Calcul raises par fraction de pot (pot_if_player_calls={}) pour street {}", pot_if_player_calls, street_to_string(current_street));
-            for (double fraction : fracs) {
-                if (fraction <= 0) continue;
-                int raise_increment_from_pot = static_cast<int>(std::round(fraction * pot_if_player_calls));
-                raise_increment_from_pot = std::max(0, raise_increment_from_pot);
-                int candidate_total_bet = max_bet + raise_increment_from_pot;
-                candidate_total_bet = std::max(min_raise_total_bet, candidate_total_bet);
-                candidate_total_bet = std::min(max_raise_total_bet, candidate_total_bet);
-                if (candidate_total_bet > max_bet) {
-                     raise_total_bets.insert(candidate_total_bet);
-                     spdlog::trace("  -> Frac {:.2f}: inc={}, clamped_total_bet={}. Ajouté.", fraction, raise_increment_from_pot, candidate_total_bet);
+    for (double fraction : fractions) {
+        if (fraction <= 0) continue;
+
+        int amount_to_call_for_player = max_bet - player_bet;
+        if (amount_to_call_for_player < 0) amount_to_call_for_player = 0; // Si le joueur peut checker ou ouvrir
+
+        // Le "pot" pour un "pot-sized bet/raise" ou une fraction de celui-ci est généralement défini comme:
+        // pot_actuel_sur_la_table + montant_que_le_joueur_doit_mettre_pour_caller.
+        // Ensuite, le joueur relance de (fraction * ce_nouveau_pot_calculé) EN PLUS de sa mise pour caller.
+        double effective_pot_for_raise_calc = base_pot_for_fraction_calc + amount_to_call_for_player;
+        
+        int raise_increment = static_cast<int>(std::round(effective_pot_for_raise_calc * fraction));
+        int target = max_bet + raise_increment;
+
+        spdlog::debug("ActionAbstraction: Fraction {}, amount_to_call_for_player={}, effective_pot_for_raise_calc={}, raise_increment={}, target={}", 
+            fraction, amount_to_call_for_player, effective_pot_for_raise_calc, raise_increment, target);
+
+        if (target > max_bet && raise_increment >= min_raise_size && target <= player_bet + player_stack) {
+            raise_targets.insert(target);
+            spdlog::debug("ActionAbstraction: RAISE {} (fraction {}) ajouté pour P{}", target, fraction, current_player);
+        } else {
+            spdlog::debug("ActionAbstraction: RAISE {} (fraction {}) REJETÉ pour P{}. Conditions: target({}) > max_bet({}), raise_increment({}) >= min_raise_size({}), target({}) <= player_bet({}) + player_stack({})",
+                         target, fraction, current_player, target, max_bet, raise_increment, min_raise_size, target, player_bet, player_stack);
+        }
+    }
+
+    // Mises exactes : Action.amount = montant total voulu
+    auto exact_bet_values = get_exact_bets_for_position(state);
+    spdlog::debug("ActionAbstraction: Mises exactes disponibles pour P{}: {}", current_player, exact_bet_values.size());
+    for (int exact_target_value : exact_bet_values) {
+        if (exact_target_value <= 0) continue;
+
+        int current_target = exact_target_value;
+        int increment = current_target - max_bet;
+
+        if (current_target > max_bet) { // Doit être supérieur à la mise actuelle pour être un raise potentiel
+            if (increment >= min_raise_size) { // L'incrément est-il suffisant ?
+                // Oui, le raise est valide tel quel
+                if (current_target <= player_bet + player_stack) { // Le joueur a-t-il assez ?
+                    raise_targets.insert(current_target);
+                    spdlog::debug("ActionAbstraction: RAISE {} (exact) ajouté pour P{}", current_target, current_player);
+                }
+            } else { // Non, l'incrément est trop petit (increment < min_raise_size)
+                     // Le test s'attend à un "clamping" au min_raise si possible.
+                int clamped_target = max_bet + min_raise_size;
+                // Assurer que le clamped_target n'est pas un call (si min_raise_size était 0 par erreur)
+                // et que le joueur peut le payer.
+                if (clamped_target > max_bet && clamped_target <= player_bet + player_stack) {
+                    raise_targets.insert(clamped_target);
+                    spdlog::debug("ActionAbstraction: EXACT_CLAMPED: Exact bet {} (inc {}) from P{} was too small (min_raise_size {}), CLAMPED and ADDED as target {}.", 
+                                 exact_target_value, increment, current_player, min_raise_size, clamped_target);
+                } else {
+                    spdlog::debug("ActionAbstraction: EXACT_CLAMP_REJECTED: Exact bet {} (inc {}) from P{} was too small (min_raise_size {}). Clamped target {} REJECTED (conds: clamped({}) > max_bet({}), clamped({}) <= p_bet({}) + p_stack({})).",
+                                 exact_target_value, increment, current_player, min_raise_size, clamped_target,
+                                 clamped_target, max_bet, clamped_target, player_bet, player_stack);
                 }
             }
+        } else { // current_target <= max_bet
+            spdlog::debug("ActionAbstraction: EXACT_REJECTED_NOT_A_RAISE: Exact bet {} from P{} is not > max_bet ({}), not a raise.", 
+                         exact_target_value, current_player, max_bet);
         }
     }
 
-    // 2. Relances basées sur des multiples de BB
-    auto street_bb_sizes_it = bb_sizes_by_street_.find(current_street);
-    if (street_bb_sizes_it != bb_sizes_by_street_.end()) {
-        const auto& bb_multipliers = street_bb_sizes_it->second;
-        for (double bb_mult : bb_multipliers) {
-            if (bb_mult <= 0) continue;
-            int candidate_total_bet;
-            if (is_open_opportunity) {
-                // Pour une ouverture, le multiplicateur de BB définit la taille totale de la mise
-                candidate_total_bet = static_cast<int>(bb_mult * current_bb_size);
-            } else {
-                // Pour une sur-relance, le multiplicateur de BB définit la taille de l'incrément de relance
-                int raise_increment_bb = static_cast<int>(bb_mult * current_bb_size);
-                candidate_total_bet = max_bet + raise_increment_bb;
-            }
-
-            candidate_total_bet = std::max(candidate_total_bet, min_raise_total_bet);
-            candidate_total_bet = std::min(candidate_total_bet, max_raise_total_bet);
-
-            if (candidate_total_bet > max_bet) {
-                raise_total_bets.insert(candidate_total_bet);
-                spdlog::trace("  P{}: BB mult {} -> total_bet {} (open? {}, inc {})", current_player, bb_mult, candidate_total_bet, is_open_opportunity, candidate_total_bet - max_bet);
-            }
-        }
-    }
-    
-    // 3. Mises exactes (NOUVEAU)
-    auto street_exact_bets_it = exact_bets_by_street_.find(current_street);
-    if (street_exact_bets_it != exact_bets_by_street_.end()) {
-        const auto& exact_amounts = street_exact_bets_it->second;
-        for (int exact_val : exact_amounts) {
-            if (exact_val <= 0) {
-                spdlog::trace("  P{}: Exact bet value {} is <=0. Skipping.", current_player, exact_val);
-                continue;
-            }
-            int candidate_total_bet;
-            if (is_open_opportunity) {
-                // Pour une ouverture, le montant exact définit la taille totale de la mise
-                candidate_total_bet = exact_val;
-                 spdlog::trace("  P{}: Exact bet (open) specified: {}", current_player, exact_val);
-            } else {
-                // Pour une sur-relance, le montant exact définit la taille de l'incrément
-                candidate_total_bet = max_bet + exact_val;
-                spdlog::trace("  P{}: Exact bet (re-raise increment) specified: {} -> total {}", current_player, exact_val, candidate_total_bet);
-            }
-
-            // Important: Clamper par min_raise_total_bet seulement si ce n'est pas une ouverture à 0
-            // Ou si le min_raise_total_bet est effectivement plus grand que notre mise exacte d'ouverture
-            if (!is_open_opportunity || candidate_total_bet < min_raise_total_bet) {
-                candidate_total_bet = std::max(candidate_total_bet, min_raise_total_bet);
-            }                    
-            candidate_total_bet = std::min(candidate_total_bet, max_raise_total_bet);
-
-            if (candidate_total_bet > max_bet) {
-                raise_total_bets.insert(candidate_total_bet);
-                spdlog::trace("  P{}: Exact bet value {} -> final total_bet {} (open? {})", current_player, exact_val, candidate_total_bet, is_open_opportunity);
-            } else {
-                spdlog::trace("  P{}: Exact bet value {} (open? {}) -> candidate {} not > max_bet {}. Clamped min_raise_total_bet was {}. Skipping.", 
-                              current_player, exact_val, is_open_opportunity, candidate_total_bet, max_bet, min_raise_total_bet);
-            }
-        }
-    }
-
-    // 4. Ajouter l'action All-in (si autorisée)
-    if (allow_all_in_) {
-        if (max_raise_total_bet > max_bet) {
-             spdlog::trace("ActionAbstraction: Ajout de RAISE All-in ({}) pour P{}", max_raise_total_bet, current_player);
-             raise_total_bets.insert(max_raise_total_bet);
+    // All-in si autorisé
+    if (allow_all_in_ && player_stack > 0) {
+        int allin_target = player_bet + player_stack;
+        // Un all-in est valide s'il est supérieur à la mise actuelle.
+        // Il n'a pas besoin de respecter min_raise_size s'il est le seul montant possible.
+        // Cependant, s'il est plus petit qu'un min-raise valide, il ne rouvrira pas les mises pour les joueurs ayant déjà agi.
+        // Notre ActionAbstraction ne gère pas la réouverture des mises, donc on l'ajoute si > max_bet.
+        if (allin_target > max_bet) {
+             // On vérifie aussi si l'all-in est bien un raise (au moins min_raise_size) ou juste un call insuffisant
+            // Si (allin_target - max_bet) < min_raise_size ET allin_target < max_bet + min_raise_size,
+            // c'est un all-in qui ne constitue pas un "full raise". Il est quand même valide.
+            // La condition principale est target > max_bet.
+            // La condition (target - max_bet) >= min_raise_size est pour les raises "normaux".
+            // Pour un all-in, on permet de miser moins que min_raise_size si c'est tout ce que le joueur a.
+            // Il faut juste que ce soit plus que max_bet.
+            raise_targets.insert(allin_target);
+            spdlog::debug("ActionAbstraction: All-in target {} retenu pour P{}", allin_target, current_player);
         } else {
-             spdlog::trace("ActionAbstraction: All-in ({}) pour P{} est <= max_bet ({}), pas ajouté comme RAISE.", max_raise_total_bet, current_player, max_bet);
+            spdlog::debug("ActionAbstraction: All-in target {} rejeté pour P{} car non supérieur à max_bet ({})", allin_target, current_player, max_bet);
         }
     }
 
-    // --- Finalisation : Ajouter les montants uniques au vecteur d'actions ---
-    for (int final_total_bet : raise_total_bets) {
-        int raise_increment = final_total_bet - max_bet;
-        bool is_all_in_raise = (final_total_bet == max_raise_total_bet);
-        if (!is_all_in_raise && raise_increment < min_raise_increment) {
-             spdlog::warn("ActionAbstraction: Ignored raise amount {} for P{}: raise_increment {} < min_raise_increment {} (and not all-in)",
-                          final_total_bet, current_player, raise_increment, min_raise_increment);
-             continue;
-        }
-        actions.push_back({current_player, ActionType::RAISE, final_total_bet});
-        spdlog::trace("ActionAbstraction: RAISE ({}) ajouté pour P{}", final_total_bet, current_player);
+    // Générer les actions RAISE pour chaque cible unique et triée
+    for (int target : raise_targets) {
+        actions.push_back({current_player, ActionType::RAISE, target});
+        spdlog::debug("ActionAbstraction: Action RAISE {} effectivement ajoutée pour P{}", target, current_player);
     }
+}
+
+// Correction de la logique de position pour les tests
+std::set<double> ActionAbstraction::get_fractions_for_position(const GameState& state) const {
+    Position effective_pos = get_effective_position(state);
+    Street street = state.get_current_street();
+
+    auto street_it = fractions_by_street_position_.find(street);
+    if (street_it == fractions_by_street_position_.end()) {
+        return {};
+    }
+
+    auto pos_it = street_it->second.find(effective_pos);
+    if (pos_it == street_it->second.end()) {
+        return {};
+    }
+
+    return pos_it->second;
+}
+
+std::set<double> ActionAbstraction::get_bb_sizes_for_position(const GameState& state) const {
+    Position effective_pos = get_effective_position(state);
+    Street street = state.get_current_street();
+    int current_player = state.get_current_player();
+
+    spdlog::debug("ActionAbstraction: get_bb_sizes_for_position: P{} en position effective {} (street: {})", 
+                  current_player, position_to_string(effective_pos), street_to_string(street));
+
+    auto street_it = bb_sizes_by_street_position_.find(street);
+    if (street_it == bb_sizes_by_street_position_.end()) {
+        spdlog::debug("ActionAbstraction: get_bb_sizes_for_position: Aucune taille BB trouvée pour street {}", street_to_string(street));
+        return {};
+    }
+
+    auto pos_it = street_it->second.find(effective_pos);
+    if (pos_it == street_it->second.end()) {
+        spdlog::debug("ActionAbstraction: get_bb_sizes_for_position: Aucune taille BB trouvée pour position {}", position_to_string(effective_pos));
+        return {};
+    }
+
+    spdlog::debug("ActionAbstraction: get_bb_sizes_for_position: Tailles BB trouvées pour P{}: {}", current_player, pos_it->second.size());
+    for (double bb_size : pos_it->second) {
+        spdlog::debug("ActionAbstraction: get_bb_sizes_for_position: Taille BB {} pour P{}", bb_size, current_player);
+    }
+    return pos_it->second;
+}
+
+std::set<int> ActionAbstraction::get_exact_bets_for_position(const GameState& state) const {
+    Position effective_pos = get_effective_position(state);
+    Street street = state.get_current_street();
+
+    auto street_it = exact_bets_by_street_position_.find(street);
+    if (street_it == exact_bets_by_street_position_.end()) {
+        return {};
+    }
+
+    auto pos_it = street_it->second.find(effective_pos);
+    if (pos_it == street_it->second.end()) {
+        return {};
+    }
+
+    return pos_it->second;
+}
+
+int ActionAbstraction::calculate_min_raise_size(const GameState& state) const {
+    int last_raise_amount = state.get_last_raise_size(); // Montant du dernier bet/raise sur la street
+    int bb = state.get_big_blind_size();
+
+    if (last_raise_amount <= 0) { // Aucun bet/raise précédent sur cette street (ou c'est le premier bet)
+        return bb; // Le premier bet ou raise doit être d'au moins la BB
+    } else {
+        // Un re-raise doit être d'un montant (ajouté) au moins égal au précédent bet/raise, 
+        // et ce montant (ajouté) doit aussi être au moins la BB.
+        return std::max(bb, last_raise_amount);
+    }
+}
+
+int ActionAbstraction::calculate_pot_size(const GameState& state) const {
+    int pot = state.get_pot_size();
+    // Ajouter les antes au pot pour le calcul des fractions
+    pot += state.get_ante() * state.get_num_players();
+    return pot;
 }
 
 } // namespace gto_solver 

@@ -53,4 +53,8 @@ message(STATUS "CXX Standard: ${CMAKE_CXX_STANDARD}")
 # Supprimer les blocs add_library et add_executable ajoutés par erreur ici
 # La définition de la cible gto_core se trouve dans src/CMakeLists.txt
 
+# Options de compilation globales
+add_compile_options(-Wall -Wextra -pedantic -Wno-unused-parameter -std=c++17)
+add_compile_definitions(SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG)
+
 # \... Fin du fichier ... 

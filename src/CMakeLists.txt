@@ -22,8 +22,9 @@ add_library(gto_core STATIC
 target_include_directories(gto_core PUBLIC
     $<INSTALL_INTERFACE:include>
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include> # Accès à include/
+    ${PROJECT_SOURCE_DIR} # AJOUT: Accès à la racine du projet pour des en-têtes comme core/deck.hpp
     PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR} # Accès à core/
+    ${CMAKE_CURRENT_SOURCE_DIR} # Accès à src/ pour les sources de la lib gto_core elle-même
 )
 
 target_compile_features(gto_core PUBLIC cxx_std_20)

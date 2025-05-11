@@ -27,7 +27,7 @@ int main(int /*argc*/, char* /*argv*/[])
     const int         ante             = 0;
     const int         button_pos       = 0;
     const int         big_blind        = 2;
-    const int         num_iterations   = 4;            // Valeur basse pour test
+    const int         num_iterations   = 1;            // Valeur basse pour test
     const std::string infoset_filename = "infoset_map.dat";
 
     try
@@ -37,30 +37,30 @@ int main(int /*argc*/, char* /*argv*/[])
             num_players, initial_stack, ante, button_pos, big_blind);
         spdlog::info("État de jeu initial (template) créé.");
 
-        // 2. Créer l’abstraction d’action (configuration enrichie)
+        // 2. Créer l'abstraction d'action (configuration enrichie)
         // --------------------------------------------------------
 
         // Fractions de pot par street
-        gto_solver::ActionAbstraction::StreetFractionsMap fractions = {
-            {gto_solver::Street::PREFLOP, {0.5, 0.75, 1.0, 1.25}},
-            {gto_solver::Street::FLOP,    {0.25, 0.33, 0.5, 0.66, 0.75, 1.0, 1.25, 1.5}},
-            {gto_solver::Street::TURN,    {0.33, 0.5, 0.66, 0.75, 1.0, 1.25, 1.5, 2.0}},
-            {gto_solver::Street::RIVER,   {0.33, 0.5, 0.75, 1.0, 1.5, 2.0, 2.5}}
+        gto_solver::ActionAbstraction::StreetPositionFractionsMap fractions = {
+            {gto_solver::Street::PREFLOP, {{gto_solver::Position::BTN, {0.5, 0.75, 1.0, 1.25}}}},
+            {gto_solver::Street::FLOP,    {{gto_solver::Position::BTN, {0.25, 0.33, 0.5, 0.66, 0.75, 1.0, 1.25, 1.5}}}},
+            {gto_solver::Street::TURN,    {{gto_solver::Position::BTN, {0.33, 0.5, 0.66, 0.75, 1.0, 1.25, 1.5, 2.0}}}},
+            {gto_solver::Street::RIVER,   {{gto_solver::Position::BTN, {0.33, 0.5, 0.75, 1.0, 1.5, 2.0, 2.5}}}}
         };
 
         // Tailles en BB par street
-        gto_solver::ActionAbstraction::StreetBBSizesMap bb_sizes = {
-            {gto_solver::Street::PREFLOP, {2.2, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0}},
-            {gto_solver::Street::FLOP,    {1.0, 1.5, 2.0}},
-            {gto_solver::Street::TURN,    {1.5, 2.0, 2.5}},
-            {gto_solver::Street::RIVER,   {2.0, 2.5, 3.0}}
+        gto_solver::ActionAbstraction::StreetPositionBBSizesMap bb_sizes = {
+            {gto_solver::Street::PREFLOP, {{gto_solver::Position::BTN, {2.2, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0}}}},
+            {gto_solver::Street::FLOP,    {{gto_solver::Position::BTN, {1.0, 1.5, 2.0}}}},
+            {gto_solver::Street::TURN,    {{gto_solver::Position::BTN, {1.5, 2.0, 2.5}}}},
+            {gto_solver::Street::RIVER,   {{gto_solver::Position::BTN, {2.0, 2.5, 3.0}}}}
         };
 
         // Mises exactes par street
-        gto_solver::ActionAbstraction::StreetExactBetsMap exact_bets = {
-            {gto_solver::Street::FLOP,  {5, 8, 10, 12, 15, 20, 25, 30}},
-            {gto_solver::Street::TURN,  {10, 15, 20, 25, 30, 40, 50}},
-            {gto_solver::Street::RIVER, {20, 30, 40, 50, 75, 100}}
+        gto_solver::ActionAbstraction::StreetPositionExactBetsMap exact_bets = {
+            {gto_solver::Street::FLOP,  {{gto_solver::Position::BTN, {5, 8, 10, 12, 15, 20, 25, 30}}}},
+            {gto_solver::Street::TURN,  {{gto_solver::Position::BTN, {10, 15, 20, 25, 30, 40, 50}}}},
+            {gto_solver::Street::RIVER, {{gto_solver::Position::BTN, {20, 30, 40, 50, 75, 100}}}}
         };
 
         gto_solver::ActionAbstraction abstraction(
@@ -71,18 +71,18 @@ int main(int /*argc*/, char* /*argv*/[])
             exact_bets,
             /*allow_all_in*/      true);
 
-        spdlog::info("Abstraction d’actions enrichie créée.");
+        spdlog::info("Abstraction d'actions enrichie créée.");
 
         // 3. Initialiser le moteur CFR
         gto_solver::CFREngine engine(abstraction);
         spdlog::info("Moteur CFR initialisé.");
 
-        // 4. Charger une éventuelle map d’infosets
+        // 4. Charger une éventuelle map d'infosets
         if (engine.load_infoset_map(infoset_filename))
             spdlog::info("Infosets chargés depuis {} ({} entrées).",
                          infoset_filename, engine.get_infoset_map().size());
         else
-            spdlog::info("Pas de map d’infosets existante ({}) – nouvel entraînement.",
+            spdlog::info("Pas de map d'infosets existante ({}) – nouvel entraînement.",
                          infoset_filename);
 
         // 5. Exécuter les itérations CFR
@@ -90,17 +90,17 @@ int main(int /*argc*/, char* /*argv*/[])
         engine.run_iterations(num_iterations, initial_state_template);
         spdlog::info("Entraînement CFR terminé.");
 
-        // 6. Sauvegarder la map d’infosets
+        // 6. Sauvegarder la map d'infosets
         spdlog::info("Infosets après entraînement : {}",
                      engine.get_infoset_map().size());
 
         if (engine.get_infoset_map().empty())
         {
-            spdlog::warn("Map d’infosets vide ; sauvegarde annulée.");
+            spdlog::warn("Map d'infosets vide ; sauvegarde annulée.");
         }
         else if (engine.save_infoset_map(infoset_filename))
         {
-            spdlog::info("Map d’infosets sauvegardée dans {}.",
+            spdlog::info("Map d'infosets sauvegardée dans {}.",
                          infoset_filename);
         }
         else

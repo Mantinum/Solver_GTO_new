@@ -44,4 +44,12 @@ void Deck::shuffle() {
     next_card_index_ = 0;
 }
 
+void Deck::set_cards_for_testing(const std::vector<Card>& specific_deck) {
+    if (specific_deck.size() != NUM_CARDS) {
+        throw std::invalid_argument("Specific deck for testing must contain exactly " + std::to_string(NUM_CARDS) + " cards.");
+    }
+    cards_ = specific_deck;
+    next_card_index_ = 0; // Reset l'index pour commencer à dealer depuis le début du deck fourni
+}
+
 } // namespace gto_solver 

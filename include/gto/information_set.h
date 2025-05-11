@@ -13,6 +13,9 @@
 
 namespace gto_solver {
 
+// Type alias pour la stratégie (vecteur de probabilités d'action)
+using Strategy = std::vector<double>;
+
 class InformationSet {
 public:
     // Clé unique identifiant ce nœud d'information.

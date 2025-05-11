@@ -8,6 +8,7 @@ add_executable(gto_tests
     # hand_evaluator_tests.cpp # <-- SUPPRIMÉ car fichier introuvable et eval_tests.cpp existe déjà
     action_abstraction_tests.cpp
     information_set_tests.cpp
+    cfr_engine_tests.cpp # <-- NOUVEAU FICHIER DE TEST
 )
 
 # Définir le chemin vers HandRanks.dat comme une macro C++

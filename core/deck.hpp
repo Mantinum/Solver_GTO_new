@@ -18,6 +18,7 @@ public:
     void burn_card();
     void shuffle();
     void reset();
+    void set_cards_for_testing(const std::vector<Card>& specific_deck);
 
 private:
     std::vector<Card> cards_;
