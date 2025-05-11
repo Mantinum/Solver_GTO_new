@@ -113,9 +113,9 @@ double CFREngine::cfr_traverse(GameState current_state, std::vector<double>& pla
                         if (rank_p0 == INVALID_HAND_RANK || rank_p1 == INVALID_HAND_RANK) {
                            spdlog::error("CFR Showdown: Invalid hand rank P0 ({}) or P1 ({}). State:\n{}", rank_p0, rank_p1, current_state.toString());
                            p0_utility = 0.0; // Erreur, traiter comme une égalité pour l'instant
-                        } else if (rank_p0 > rank_p1) { // P0 gagne
+                        } else if (rank_p0 < rank_p1) { // P0 a un meilleur rang (plus bas), P0 gagne
                             p0_utility = static_cast<double>(pot_size) / 2.0;
-                        } else if (rank_p1 > rank_p0) { // P1 gagne
+                        } else if (rank_p1 < rank_p0) { // P1 a un meilleur rang (plus bas), P1 gagne
                             p0_utility = -static_cast<double>(pot_size) / 2.0;
                         } else { // Égalité
                             p0_utility = 0.0;
@@ -127,155 +127,23 @@ double CFREngine::cfr_traverse(GameState current_state, std::vector<double>& pla
                         p0_utility = 0.0; // Erreur
                     }
                 } else { // Cas où le board n'a PAS 5 cartes (showdown au Flop ou au Turn)
-                    // TODO: CRITICAL - Implémenter le calcul d'équité pour les boards incomplets.
-                    // spdlog::warn("CFR Showdown: Board non complet ({} cartes). Début calcul d'équité (placeholder).", current_state.get_board_cards_dealt());
+                    spdlog::trace("CFR Showdown: Board non complet ({} cartes). Calcul d'équité.", current_state.get_board_cards_dealt());
 
-                    const auto& p0_hand_cards = current_state.get_player_hand(0); // Devrait être std::vector<Card>
-                    const auto& p1_hand_cards = current_state.get_player_hand(1); // Devrait être std::vector<Card>
+                    const auto& p0_hand_cards = current_state.get_player_hand(0);
+                    const auto& p1_hand_cards = current_state.get_player_hand(1);
                     
-                    std::vector<Card> current_board_cards_vec;
-                    const auto& board_array_incomplete = current_state.get_board();
-                    for(int k=0; k < current_state.get_board_cards_dealt(); ++k) {
-                        if(board_array_incomplete[k] != INVALID_CARD) current_board_cards_vec.push_back(board_array_incomplete[k]);
-                    }
-
-                    int num_board_cards_dealt = current_state.get_board_cards_dealt();
-                    int cards_to_deal_for_full_board = 5 - num_board_cards_dealt;
-
-                    // Récupérer les cartes restantes dans le deck.
-                    // Cela nécessitera une nouvelle méthode dans GameState ou Deck.
-                    // Exemple: std::vector<Card> remaining_deck = current_state.get_remaining_deck_cards();
-                    // Pour l'instant, on simule un deck vide pour éviter des erreurs de compilation,
-                    // mais cela doit être remplacé par le vrai deck restant.
-                    std::vector<Card> remaining_deck = current_state.get_remaining_deck_cards(); // MODIFIÉ ICI
-
                     if (p0_hand_cards.size() != 2 || p1_hand_cards.size() != 2) {
-                        spdlog::error("CFR Equity Calc: Incorrect player hand size for equity calculation.");
+                        spdlog::error("CFR Equity Calc Prereq: Incorrect player hand size. P0: {}, P1: {}. State:\n{}", 
+                                      p0_hand_cards.size(), p1_hand_cards.size(), current_state.toString());
                         p0_utility = 0.0; // Erreur
-                    } else if (remaining_deck.empty() && cards_to_deal_for_full_board > 0) {
-                         // Si on a besoin de cartes mais que le deck (simulé) est vide.
-                         // En réalité, si on arrive ici avec un deck vraiment vide, c'est une erreur de logique en amont.
-                         spdlog::error("CFR Equity Calc: Remaining deck is empty, cannot deal {} cards.", cards_to_deal_for_full_board);
-                         p0_utility = 0.0;
-                    } else if (cards_to_deal_for_full_board < 0) {
-                        spdlog::error("CFR Equity Calc: cards_to_deal_for_full_board is negative ({}), board already has {} cards.",
-                                       cards_to_deal_for_full_board, num_board_cards_dealt);
-                        p0_utility = 0.0;
-                    }
-                    else if (cards_to_deal_for_full_board == 0) { // Devrait avoir été géré par le if (board_cards_dealt == 5)
-                        spdlog::error("CFR Equity Calc: cards_to_deal_for_full_board is 0 but not caught by 5-card board logic.");
-                        p0_utility = 0.0; // Fallback, mais c'est une erreur de logique
-                    }
-                    else {
-                        // Ici, la logique pour itérer sur les combinaisons de `remaining_deck`
-                        // pour tirer `cards_to_deal_for_full_board` cartes.
+                    } else {
+                        // Extraire les arguments pour la nouvelle signature de calculate_equity
+                        std::vector<Card> board_cards_for_equity = current_state.get_board_vector();
+                        std::vector<Card> deck_for_equity = current_state.get_remaining_deck_cards();
+                        int pot_for_equity = current_state.get_pot_size();
 
-                        long p0_wins = 0;
-                        long p1_wins = 0;
-                        long ties = 0;
-                        long total_runouts_simulated = 0;
-
-                        // Exemple simplifié pour 1 carte à tirer (showdown au Turn)
-                        if (cards_to_deal_for_full_board == 1) {
-                            if (remaining_deck.empty()) {
-                                spdlog::error("CFR Equity Calc (1 card): Remaining deck is empty, cannot deal turn card.");
-                            } else {
-                                for (Card turn_card : remaining_deck) { 
-                                    std::vector<Card> final_board = current_board_cards_vec;
-                                    final_board.push_back(turn_card);
-                                    // Pas besoin de vérifier la validité de turn_card ici car get_remaining_deck_cards
-                                    // ne devrait retourner que des cartes valides et non utilisées.
-                                    // Il faut s'assurer que final_board a bien 4 cartes pour l'évaluation 7 cartes (2+2+3 initial + 1)
-                                    // Non, evaluate_hand_7_card attend 5 cartes de board. Il faut ajuster.
-                                    // Notre `evaluate_hand_7_card` prend 2 cartes main + 5 board.
-                                    // Ici, current_board_cards_vec a 3 cartes (Flop), on ajoute la Turn, il en manque une pour River.
-                                    // Ah, non, si cards_to_deal_for_full_board == 1, c'est qu'on est au Turn et il manque la River.
-                                    // Donc current_board_cards_vec a 4 cartes (Flop+Turn), et final_board aura 5 cartes.
-                                    // Donc, il faut que `current_board_cards_vec` ait 4 cartes (Flop+Turn) si on est ici.
-                                    // Et on ajoute la River card (appelée `turn_card` dans la boucle, renommons là `river_card_iter`)
-
-                                    if (final_board.size() == 5) { // Vérification cruciale
-                                        short rank_p0 = gto_solver::evaluate_hand_7_card(p0_hand_cards[0], p0_hand_cards[1], final_board);
-                                        short rank_p1 = gto_solver::evaluate_hand_7_card(p1_hand_cards[0], p1_hand_cards[1], final_board);
-
-                                        if (rank_p0 == INVALID_HAND_RANK || rank_p1 == INVALID_HAND_RANK) {
-                                            spdlog::error("CFR Equity Calc (1 card): Invalid hand rank during runout. P0:{}, P1:{}", rank_p0, rank_p1);
-                                            // Que faire? On peut ignorer ce runout ou compter comme égalité
-                                        } else if (rank_p0 > rank_p1) {
-                                            p0_wins++;
-                                        } else if (rank_p1 > rank_p0) {
-                                            p1_wins++;
-                                        } else {
-                                            ties++;
-                                        }
-                                        total_runouts_simulated++;
-                                    } else {
-                                        spdlog::error("CFR Equity Calc (1 card): Final board size is not 5 ({}) after adding river card. Initial board size: {}. River card: {}", 
-                                                      final_board.size(), current_board_cards_vec.size(), gto_solver::to_string(turn_card));
-                                    }
-                                }
-                            }
-                            // spdlog::debug("Equity calc for 1 card to come: Placeholder. Need actual remaining_deck and iteration.");
-                            spdlog::debug("Equity calc (1 card): total_runouts_simulated={}, p0_wins={}, p1_wins={}, ties={}",
-                                          total_runouts_simulated, p0_wins, p1_wins, ties);
-                        } 
-                        // Exemple pour 2 cartes à tirer (showdown au Flop)
-                        else if (cards_to_deal_for_full_board == 2) {
-                            if (remaining_deck.size() < 2) {
-                                spdlog::error("CFR Equity Calc (2 cards): Remaining deck size ({}) is less than 2, cannot deal turn and river.", remaining_deck.size());
-                            } else {
-                                // Combinatorics: itérer sur toutes paires de cartes de remaining_deck
-                                for (size_t i = 0; i < remaining_deck.size(); ++i) {
-                                    for (size_t j = i + 1; j < remaining_deck.size(); ++j) {
-                                        Card turn_card_candidate = remaining_deck[i];
-                                        Card river_card_candidate = remaining_deck[j];
-                                        
-                                        std::vector<Card> final_board = current_board_cards_vec; // current_board_cards_vec a 3 cartes (Flop)
-                                        final_board.push_back(turn_card_candidate);
-                                        final_board.push_back(river_card_candidate);
-
-                                        if (final_board.size() == 5) { // Vérification cruciale
-                                            short rank_p0 = gto_solver::evaluate_hand_7_card(p0_hand_cards[0], p0_hand_cards[1], final_board);
-                                            short rank_p1 = gto_solver::evaluate_hand_7_card(p1_hand_cards[0], p1_hand_cards[1], final_board);
-
-                                            if (rank_p0 == INVALID_HAND_RANK || rank_p1 == INVALID_HAND_RANK) {
-                                                spdlog::error("CFR Equity Calc (2 cards): Invalid hand rank during runout. P0:{}, P1:{}", rank_p0, rank_p1);
-                                            } else if (rank_p0 > rank_p1) {
-                                                p0_wins++;
-                                            } else if (rank_p1 > rank_p0) {
-                                                p1_wins++;
-                                            } else {
-                                                ties++;
-                                            }
-                                            total_runouts_simulated++;
-                                        } else {
-                                            spdlog::error("CFR Equity Calc (2 cards): Final board size is not 5 ({}) after adding turn/river. Initial board size: {}. Turn: {}, River: {}", 
-                                                          final_board.size(), current_board_cards_vec.size(), 
-                                                          gto_solver::to_string(turn_card_candidate), gto_solver::to_string(river_card_candidate));
-                                        }
-                                    }
-                                }
-                            }
-                            // spdlog::debug("Equity calc for 2 cards to come: Placeholder. Need actual remaining_deck and iteration.");
-                            spdlog::debug("Equity calc (2 cards): total_runouts_simulated={}, p0_wins={}, p1_wins={}, ties={}",
-                                          total_runouts_simulated, p0_wins, p1_wins, ties);
-                        }
-                        // ... autres cas si plus de cartes (ne devrait pas arriver pour Texas Holdem 5-card board)
-
-                        if (total_runouts_simulated > 0) {
-                            // Utility pour P0 : (gain si P0 gagne - gain si P1 gagne (perte pour P0))
-                            // Chaque joueur a contribué pot_size / 2 au pot s'ils sont all-in.
-                            // Ce calcul suppose que le pot est partagé équitablement en cas d'égalité.
-                            // L'utilité est du point de vue de P0.
-                            // Si P0 gagne, il récupère sa mise et gagne celle de P1 => gain net = mise_P1 = pot_size / 2
-                            // Si P0 perd, il perd sa mise => perte net = -mise_P0 = -pot_size / 2
-                            p0_utility = (static_cast<double>(p0_wins - p1_wins) / total_runouts_simulated) * (static_cast<double>(pot_size) / 2.0);
-                            spdlog::debug("CFR Equity Calc Result: P0 wins {}, P1 wins {}, Ties {}. Total runouts {}. P0 Utility: {:.4f}", 
-                                          p0_wins, p1_wins, ties, total_runouts_simulated, p0_utility);
-                        } else {
-                            spdlog::warn("CFR Equity Calc: No runouts simulated for board with {} cards. Utility set to 0.", num_board_cards_dealt);
-                            p0_utility = 0.0; // Fallback si aucune simulation n'a eu lieu
-                        }
+                        p0_utility = this->calculate_equity(p0_hand_cards, p1_hand_cards, board_cards_for_equity, deck_for_equity, pot_for_equity);
+                        spdlog::trace("CFR Equity Calc Result for P0: {:.4f}", p0_utility);
                     }
                 }
             } else { // Cas imprévu à 2 joueurs (ex: les deux inactifs mais pas de fold clair?)
@@ -393,14 +261,14 @@ bool CFREngine::save_infoset_map(const std::string& filename) const {
         const std::string& key = pair.first;
         const InformationSet& node = pair.second;
 
-        // Format: cle;visit_count;regret1,regret2,...;strat1,strat2,...
-        outfile << key << ";" << node.visit_count << ";";
+        // Format: cle<TAB>visit_count<TAB>regret1,regret2,...<TAB>strat1,strat2,...
+        outfile << key << "\t" << node.visit_count << "\t";
 
         // Écrire les regrets cumulés
         for (size_t i = 0; i < node.cumulative_regrets.size(); ++i) {
             outfile << node.cumulative_regrets[i] << (i == node.cumulative_regrets.size() - 1 ? "" : ",");
         }
-        outfile << ";";
+        outfile << "\t";
 
         // Écrire la stratégie cumulée
         for (size_t i = 0; i < node.cumulative_strategy.size(); ++i) {
@@ -440,13 +308,13 @@ bool CFREngine::load_infoset_map(const std::string& filename) {
         std::string segment;
         std::vector<std::string> parts;
 
-        // Séparer par le délimiteur principal ';'
-        while (std::getline(ss_line, segment, ';')) {
+        // Séparer par le délimiteur principal '\t'
+        while (std::getline(ss_line, segment, '\t')) {
             parts.push_back(segment);
         }
 
-        if (parts.size() != 4) { // clé;visits;regrets;strategie
-            spdlog::error("Erreur de format ligne {}: Nombre incorrect de segments ({}). Ligne: {}", line_count, parts.size(), line);
+        if (parts.size() != 4) { // clé<TAB>visits<TAB>regrets<TAB>strategie
+            spdlog::error("Erreur de format ligne {}: Nombre incorrect de segments ({} attendus 4). Ligne: {}", line_count, parts.size(), line);
             continue; // Passer à la ligne suivante
         }
 
@@ -509,6 +377,91 @@ bool CFREngine::load_infoset_map(const std::string& filename) {
     infile.close();
     spdlog::info("Chargement terminé. {} infosets chargés depuis {} lignes.", loaded_count, line_count);
     return true;
+}
+
+double CFREngine::calculate_equity(
+    const std::vector<Card>& p0_hand,             // Main de P0
+    const std::vector<Card>& p1_hand,             // Main de P1
+    const std::vector<Card>& current_board_cards, // Cartes déjà sur le board
+    const std::vector<Card>& remaining_deck_cards,  // Cartes restantes dans le deck
+    int pot_size                                // Taille du pot
+) {
+    const int num_board_cards = current_board_cards.size();
+    const double pot_halved = static_cast<double>(pot_size) / 2.0;
+
+    if (p0_hand.size() != 2 || p1_hand.size() != 2) {
+        spdlog::error("CFREngine::calculate_equity: Les mains des joueurs doivent avoir 2 cartes.");
+        return 0.0; // Ou gérer l'erreur autrement
+    }
+
+    long p0_wins = 0;
+    long p1_wins = 0;
+    long ties = 0;
+    long total_runouts = 0;
+
+    std::vector<Card> actual_board_cards = current_board_cards; // Utiliser directement l'argument
+
+    if (num_board_cards == 5) { // Showdown avec board complet
+        HandRank p0_rank = gto_solver::evaluate_hand_7_card(p0_hand[0], p0_hand[1], actual_board_cards);
+        HandRank p1_rank = gto_solver::evaluate_hand_7_card(p1_hand[0], p1_hand[1], actual_board_cards);
+        if (p0_rank < p1_rank) return pot_halved;  // P0 a un meilleur rang (plus bas), P0 gagne
+        if (p1_rank < p0_rank) return -pot_halved; // P1 a un meilleur rang (plus bas), P1 gagne
+        return 0.0; // Égalité
+    } else if (num_board_cards == 4) { // Turn -> River (tirer 1 carte)
+        if (remaining_deck_cards.empty()) {
+            spdlog::warn("CFREngine::calculate_equity: Deck vide au turn, impossible de tirer la river.");
+            // Cela ne devrait pas arriver si le jeu est configuré correctement.
+            // Retourner une valeur neutre ou basée sur l'équité actuelle ? Pour l'instant, 0.
+            return 0.0; 
+        }
+        for (size_t i = 0; i < remaining_deck_cards.size(); ++i) {
+            std::vector<Card> final_board = actual_board_cards;
+            final_board.push_back(remaining_deck_cards[i]);
+            // TODO: S'assurer que deck[i] n'est pas déjà dans p0_hand, p1_hand, actual_board_cards
+            //       Normalement, get_remaining_deck_cards() devrait garantir cela.
+
+            HandRank p0_rank = gto_solver::evaluate_hand_7_card(p0_hand[0], p0_hand[1], final_board);
+            HandRank p1_rank = gto_solver::evaluate_hand_7_card(p1_hand[0], p1_hand[1], final_board);
+
+            if (p0_rank < p1_rank) p0_wins++;
+            else if (p1_rank < p0_rank) p1_wins++;
+            else ties++;
+            total_runouts++;
+        }
+    } else if (num_board_cards == 3) { // Flop -> Turn & River (tirer 2 cartes)
+        if (remaining_deck_cards.size() < 2) {
+            spdlog::warn("CFREngine::calculate_equity: Deck avec <2 cartes au flop, impossible de tirer turn/river.");
+            return 0.0;
+        }
+        for (size_t i = 0; i < remaining_deck_cards.size(); ++i) {
+            for (size_t j = i + 1; j < remaining_deck_cards.size(); ++j) {
+                std::vector<Card> final_board = actual_board_cards;
+                final_board.push_back(remaining_deck_cards[i]);
+                final_board.push_back(remaining_deck_cards[j]);
+
+                HandRank p0_rank = gto_solver::evaluate_hand_7_card(p0_hand[0], p0_hand[1], final_board);
+                HandRank p1_rank = gto_solver::evaluate_hand_7_card(p1_hand[0], p1_hand[1], final_board);
+
+                if (p0_rank < p1_rank) p0_wins++;
+                else if (p1_rank < p0_rank) p1_wins++;
+                else ties++;
+                total_runouts++;
+            }
+        }
+    } else {
+        spdlog::error("CFREngine::calculate_equity: Non implémenté pour {} cartes sur le board.", num_board_cards);
+        return 0.0; // Cas non géré (Preflop)
+    }
+
+    if (total_runouts == 0) {
+        spdlog::warn("CFREngine::calculate_equity: Aucun runout possible ? Mains: P0[{},{}], P1[{},{}], Board({}): {}, Deck size: {}", 
+            to_string(p0_hand[0]), to_string(p0_hand[1]), to_string(p1_hand[0]), to_string(p1_hand[1]), 
+            num_board_cards, vec_to_string(actual_board_cards), remaining_deck_cards.size());
+        return 0.0; // Éviter division par zéro, situation anormale
+    }
+
+    double p0_net_utility = static_cast<double>(p0_wins - p1_wins) * pot_halved;
+    return p0_net_utility / static_cast<double>(total_runouts);
 }
 
 } 

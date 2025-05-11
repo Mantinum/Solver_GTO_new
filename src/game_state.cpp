@@ -24,23 +24,38 @@ GameState::GameState(int num_players, int initial_stack, int ante, int button_po
       stacks_               (num_players, initial_stack),
       current_bets_         (num_players, 0),
       pot_size_             (0),
-      current_player_index_ (-1), // Sera défini par le début du jeu
-      last_raise_size_      (0), // Sera la BB initialement
+      current_player_index_ (-1),
+      last_raise_size_      (0),
       button_pos_           (button_pos % num_players),
       ante_                 (ante),
-      big_blind_size_       (big_blind_size), // Initialiser le nouveau membre
+      big_blind_size_       (big_blind_size),
       current_street_       (Street::PREFLOP),
       deck_                 (),
       player_hands_         (num_players, std::vector<Card>(2, INVALID_CARD)),
       board_                (),
       board_cards_dealt_    (0),
       has_folded_           (num_players, false),
-      last_aggressor_index_ (-1)
+      last_aggressor_index_ (-1),
+      positions_            (),
+      position_to_player_   (),
+      active_positions_     ()
 {
-    if (num_players <= 0) throw std::invalid_argument("Num players must be > 0");
-    if (initial_stack < 0) throw std::invalid_argument("Initial stack >= 0");
+    if (num_players <= 0 || num_players > MAX_PLAYERS) {
+        throw std::invalid_argument("Nombre de joueurs doit être entre 1 et " + std::to_string(MAX_PLAYERS));
+    }
+    if (initial_stack < 0) {
+        throw std::invalid_argument("Stack initial doit être >= 0");
+    }
+    if (ante < 0) {
+        throw std::invalid_argument("Ante doit être >= 0");
+    }
+
     std::fill(board_.begin(), board_.end(), INVALID_CARD);
 
+    // Initialiser les positions
+    initialize_positions();
+
+    // Mélanger et distribuer les cartes
     deck_.shuffle();
     for (int i = 0; i < num_players_ * 2; ++i) {
         const int player = i % num_players_;
@@ -48,61 +63,46 @@ GameState::GameState(int num_players, int initial_stack, int ante, int button_po
         if (hole < 2) player_hands_[player][hole] = deck_.deal_card();
     }
 
-    // Logique pour poster les antes et les blinds
-    // Antes
-    if (ante_ > 0) {
-        for (int i = 0; i < num_players_; ++i) {
-            int ante_to_post = std::min(stacks_[i], ante_);
-            stacks_[i] -= ante_to_post;
-            current_bets_[i] += ante_to_post; // Les antes font partie des mises initiales
-            pot_size_ += ante_to_post;
-        }
-    }
+    // Collecter les antes
+    collect_antes();
 
-    // Blinds (pour 2 joueurs, le bouton est SB)
+    // Poster les blinds
     if (num_players_ > 0) {
         int sb_player = button_pos_;
         int bb_player = (button_pos_ + 1) % num_players_;
         
-        if (num_players_ == 1) { // Cas Heads-up simplifié où un seul joueur posterait tout
-             bb_player = sb_player;
-        }
-
         // Small Blind
-        // int small_blind_amount = BB_SIZE / 2; // Ou big_blind_size_ / 2
-        int small_blind_amount = big_blind_size_ / 2; // Utiliser le big_blind_size passé
-        small_blind_amount = std::max(1, small_blind_amount); // Assurer au moins 1 si BB=1
+        int small_blind_amount = big_blind_size_ / 2;
+        small_blind_amount = std::max(1, small_blind_amount);
 
         int sb_to_post = std::min(stacks_[sb_player], small_blind_amount);
         stacks_[sb_player] -= sb_to_post;
         current_bets_[sb_player] += sb_to_post;
         pot_size_ += sb_to_post;
 
-        // Big Blind (seulement si plus d'un joueur, sinon SB a déjà posté)
+        // Big Blind
         if (num_players_ > 1) {
-            // int big_blind_amount = BB_SIZE; // Ou big_blind_size_
-            int big_blind_amount = big_blind_size_; // Utiliser le big_blind_size passé
-            int bb_to_post = std::min(stacks_[bb_player], big_blind_amount);
+            int bb_to_post = std::min(stacks_[bb_player], big_blind_size_);
             stacks_[bb_player] -= bb_to_post;
             current_bets_[bb_player] += bb_to_post;
             pot_size_ += bb_to_post;
-            last_raise_size_ = big_blind_amount; // La BB est la première "relance" à battre
-            last_aggressor_index_ = bb_player; // Le BB est le premier agresseur
-            current_player_index_ = (bb_player + 1) % num_players_; // Action commence après BB (ou UTG)
-        } else { // Si un seul joueur, il a posté SB, et c'est son tour.
-            last_raise_size_ = small_blind_amount;
-            last_aggressor_index_ = sb_player;
-            current_player_index_ = sb_player;
-        }
-        // En Heads-Up, le SB (bouton) agit en premier preflop.
-        if (num_players_ == 2) {
-            current_player_index_ = button_pos_;
+            last_raise_size_ = big_blind_size_;
+            last_aggressor_index_ = bb_player;
         }
 
-    } else { // Pas de joueurs
-        current_player_index_ = 0;
+        // Déterminer le premier joueur à agir
+        if (num_players_ == 2) {
+            // En Heads-up, le SB (bouton) agit en premier preflop
+            current_player_index_ = button_pos_;
+        } else {
+            // En 6-max, l'UTG agit en premier preflop
+            current_player_index_ = (bb_player + 1) % num_players_;
+        }
     }
-    // Distribuer les cartes privées (2 cartes par joueur pour Hold'em)
+
+    // Mettre à jour les positions actives
+    update_active_positions();
+
     spdlog::debug("GameState initialisé: {} joueurs, stack {}, BTN {}, Pot {}, Mises: {}, Premier: {}",
                   num_players_, initial_stack, button_pos_, pot_size_, fmt::join(current_bets_, ","), current_player_index_);
 }
@@ -130,6 +130,16 @@ int GameState::get_num_active_players() const {
         if (!has_folded_[p] && (stacks_[p] > 0 || current_bets_[p] > 0)) cnt++;
     }
     return cnt;
+}
+
+std::vector<Card> GameState::get_board_vector() const {
+    std::vector<Card> result;
+    for (int i = 0; i < board_cards_dealt_; ++i) {
+        if (board_[i] != INVALID_CARD) { // Double check, ne devrait pas être nécessaire
+            result.push_back(board_[i]);
+        }
+    }
+    return result;
 }
 
 // -----------------------------------------------------------------------------
@@ -370,37 +380,139 @@ std::vector<Action> GameState::get_legal_abstract_actions(const ActionAbstractio
 }
 
 // -----------------------------------------------------------------------------
-//  Fonctions Helper Privées
+//  Nouvelles méthodes pour le 6-max
 // -----------------------------------------------------------------------------
-/*
-bool GameState::is_betting_round_over() const {
-    if (current_player_index_ < 0) return true;
-    int active_players_count = 0;
-    int max_bet = 0;
-    std::vector<int> active_indices;
-    for (int p = 0; p < num_players_; ++p) {
-        if (!has_folded_[p]) {
-            active_players_count++; active_indices.push_back(p);
-            max_bet = std::max(max_bet, current_bets_[p]);
-        }
-    }
-    if (active_players_count <= 1) return true;
-    bool all_eligible_acted_and_equal = true;
-    for (int p_idx : active_indices) {
-        if (stacks_[p_idx] > 0 && current_bets_[p_idx] < max_bet) {
-            all_eligible_acted_and_equal = false; break;
-        }
-    }
-    if (all_eligible_acted_and_equal) {
-        // TODO: Logique plus fine pour fermeture action
-        bool bb_option_closed = (current_street_ == Street::PREFLOP && max_bet == BB_SIZE && current_player_index_ == (button_pos_ + 1) % num_players_);
-        if (max_bet > 0 || bb_option_closed) {
-            spdlog::trace("Betting round over (simplified check)"); return true;
-        }
-    }
-    return false;
+
+Position GameState::get_player_position(int player_index) const {
+    validate_player_index(player_index);
+    return positions_[player_index];
 }
-*/
+
+int GameState::get_position_index(Position pos) const {
+    if (!is_valid_position(pos)) {
+        throw std::invalid_argument("Position invalide");
+    }
+    return position_to_player_[static_cast<int>(pos)];
+}
+
+bool GameState::is_position_active(Position pos) const {
+    if (!is_valid_position(pos)) return false;
+    int player_index = get_position_index(pos);
+    return !has_folded_[player_index] && (stacks_[player_index] > 0 || current_bets_[player_index] > 0);
+}
+
+int GameState::get_ante() const {
+    return ante_;
+}
+
+int GameState::get_button_position() const {
+    return button_pos_;
+}
+
+std::vector<Position> GameState::get_active_positions() const {
+    return active_positions_;
+}
+
+bool GameState::is_valid_position(Position pos) const {
+    return pos != Position::INVALID && static_cast<int>(pos) < MAX_PLAYERS;
+}
+
+std::string GameState::position_to_string(Position pos) const {
+    switch (pos) {
+        case Position::BTN: return "BTN";
+        case Position::SB: return "SB";
+        case Position::BB: return "BB";
+        case Position::UTG: return "UTG";
+        case Position::MP: return "MP";
+        case Position::CO: return "CO";
+        default: return "INVALID";
+    }
+}
+
+// -----------------------------------------------------------------------------
+//  Méthodes privées pour le 6-max
+// -----------------------------------------------------------------------------
+
+void GameState::initialize_positions() {
+    // Initialiser les positions en fonction du nombre de joueurs
+    std::fill(positions_.begin(), positions_.end(), Position::INVALID);
+    std::fill(position_to_player_.begin(), position_to_player_.end(), -1);
+
+    // Mapping des positions en fonction du nombre de joueurs
+    switch (num_players_) {
+        case 6: // Full ring
+            positions_[button_pos_] = Position::BTN;
+            positions_[(button_pos_ + 1) % 6] = Position::SB;
+            positions_[(button_pos_ + 2) % 6] = Position::BB;
+            positions_[(button_pos_ + 3) % 6] = Position::UTG;
+            positions_[(button_pos_ + 4) % 6] = Position::MP;
+            positions_[(button_pos_ + 5) % 6] = Position::CO;
+            break;
+        case 5: // 5 joueurs
+            positions_[button_pos_] = Position::BTN;
+            positions_[(button_pos_ + 1) % 5] = Position::SB;
+            positions_[(button_pos_ + 2) % 5] = Position::BB;
+            positions_[(button_pos_ + 3) % 5] = Position::UTG;
+            positions_[(button_pos_ + 4) % 5] = Position::CO;
+            break;
+        case 4: // 4 joueurs
+            positions_[button_pos_] = Position::BTN;
+            positions_[(button_pos_ + 1) % 4] = Position::SB;
+            positions_[(button_pos_ + 2) % 4] = Position::BB;
+            positions_[(button_pos_ + 3) % 4] = Position::UTG;
+            break;
+        case 3: // 3 joueurs
+            positions_[button_pos_] = Position::BTN;
+            positions_[(button_pos_ + 1) % 3] = Position::SB;
+            positions_[(button_pos_ + 2) % 3] = Position::BB;
+            break;
+        case 2: // Heads-up
+            positions_[button_pos_] = Position::BTN;
+            positions_[(button_pos_ + 1) % 2] = Position::BB;
+            break;
+        default:
+            throw std::invalid_argument("Nombre de joueurs non supporté");
+    }
+
+    // Créer le mapping inverse (position -> joueur)
+    for (int i = 0; i < num_players_; ++i) {
+        if (positions_[i] != Position::INVALID) {
+            position_to_player_[static_cast<int>(positions_[i])] = i;
+        }
+    }
+
+    update_active_positions();
+}
+
+void GameState::update_active_positions() {
+    active_positions_.clear();
+    for (int i = 0; i < num_players_; ++i) {
+        if (is_position_active(positions_[i])) {
+            active_positions_.push_back(positions_[i]);
+        }
+    }
+}
+
+bool GameState::is_valid_player_index(int player_index) const {
+    return player_index >= 0 && player_index < num_players_;
+}
+
+void GameState::validate_player_index(int player_index) const {
+    if (!is_valid_player_index(player_index)) {
+        throw std::out_of_range("Index de joueur invalide");
+    }
+}
+
+void GameState::collect_antes() {
+    if (ante_ <= 0) return;
+
+    for (int i = 0; i < num_players_; ++i) {
+        int ante_to_post = std::min(stacks_[i], ante_);
+        stacks_[i] -= ante_to_post;
+        current_bets_[i] += ante_to_post;
+        pot_size_ += ante_to_post;
+    }
+}
 
 // -----------------------------------------------------------------------------
 //  Utilitaires d'affichage
