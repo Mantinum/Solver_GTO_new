@@ -19,6 +19,8 @@ public:
     
     // Constructeur
     GameState(int num_players, int initial_stack, int ante, int button_pos, int big_blind_size);
+    // Constructeur pour tests avec deck spécifique (non mélangé)
+    GameState(int num_players, int initial_stack, int ante, int button_pos, int big_blind_size, const std::vector<Card>& specific_deck);
     virtual ~GameState();
 
     // Getters
@@ -37,10 +39,7 @@ public:
     bool is_player_folded(int player_index) const;
     int get_num_players() const;
     int get_big_blind_size() const;
-    std::vector<Action> get_legal_abstract_actions(const ActionAbstraction& abstraction) const;
-    std::vector<Card> get_remaining_deck_cards() const;
-
-    // Getters pour le 6-max
+    int get_last_aggressor_index() const;
     Position get_player_position(int player_index) const;
     int get_position_index(Position pos) const;
     bool is_position_active(Position pos) const;
@@ -48,11 +47,20 @@ public:
     int get_button_position() const;
     std::vector<Position> get_active_positions() const;
     bool is_valid_position(Position pos) const;
+    int get_player_total_investment_this_hand(int player_index) const;
+    const Deck& get_deck() const;
+
+    // Méthodes qui avaient été supprimées par erreur par l'outil
+    std::vector<Action> get_legal_abstract_actions(const ActionAbstraction& abstraction) const;
+    std::vector<Card> get_remaining_deck_cards() const;
 
     // Utilitaires
     std::string toString() const;
     void print_state() const;
     std::string position_to_string(Position pos) const;
+
+    // Méthodes pour obtenir les cartes (deck, mains, board)
+    void set_cards_for_testing(const std::vector<Card>& specific_deck);
 
 private:
     // Membres privés
@@ -73,6 +81,9 @@ private:
     std::vector<bool> has_folded_; // Taille [num_players]
     int last_aggressor_index_;
 
+    // Suivi de l'investissement total par joueur pour la main en cours
+    std::vector<int> total_investment_this_hand_;
+
     // Membres pour le 6-max
     std::array<Position, MAX_PLAYERS> positions_;  // Mapping joueur -> position
     std::array<int, MAX_PLAYERS> position_to_player_;  // Mapping position -> joueur
@@ -90,6 +101,9 @@ private:
     bool is_valid_player_index(int player_index) const;
     void validate_player_index(int player_index) const;
     void collect_antes();
+    void post_blinds(int sb_player_idx, int bb_player_idx);
+    void determine_next_player_or_end_round();
+    void collect_bets_into_pot();
 };
 
 } // namespace gto_solver

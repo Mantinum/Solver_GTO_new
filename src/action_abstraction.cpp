@@ -35,7 +35,7 @@ ActionAbstraction::ActionAbstraction(
             const Position pos = pos_pair.first;
             for (double frac : pos_pair.second) {
                 if (frac <= 0.0) {
-                    spdlog::warn("ActionAbstraction: Pour street {} position {}, raise fraction {} <= 0 sera ignorée.",
+                    spdlog::debug("ActionAbstraction: Pour street {} position {}, raise fraction {} <= 0 sera ignorée.",
                                 street_to_string(street),
                                 position_to_string(pos),
                                 frac);
@@ -51,7 +51,7 @@ ActionAbstraction::ActionAbstraction(
             const Position pos = pos_pair.first;
             for (double bb_size : pos_pair.second) {
                 if (bb_size <= 0.0) {
-                    spdlog::warn("ActionAbstraction: Pour street {} position {}, BB size {} <= 0 sera ignoré.",
+                    spdlog::debug("ActionAbstraction: Pour street {} position {}, BB size {} <= 0 sera ignoré.",
                                 street_to_string(street),
                                 position_to_string(pos),
                                 bb_size);
@@ -67,7 +67,7 @@ ActionAbstraction::ActionAbstraction(
             const Position pos = pos_pair.first;
             for (int bet : pos_pair.second) {
                 if (bet <= 0) {
-                    spdlog::warn("ActionAbstraction: Pour street {} position {}, exact bet {} <= 0 sera ignoré.",
+                    spdlog::debug("ActionAbstraction: Pour street {} position {}, exact bet {} <= 0 sera ignoré.",
                                 street_to_string(street),
                                 position_to_string(pos),
                                 bet);
@@ -219,25 +219,25 @@ void ActionAbstraction::add_raise_actions(std::vector<Action>& actions, const Ga
     int pot_size = calculate_pot_size(state);
     Position effective_pos = get_effective_position(state);
 
-    spdlog::debug("ActionAbstraction: P{} en position effective {} (street: {})", 
+    spdlog::trace("ActionAbstraction: P{} en position effective {} (street: {})",
                   current_player, 
                   position_to_string(effective_pos),
                   street_to_string(state.get_current_street()));
-    spdlog::debug("ActionAbstraction: player_bet={}, max_bet={}, min_raise_size={}, BB={}", 
+    spdlog::trace("ActionAbstraction: player_bet={}, max_bet={}, min_raise_size={}, BB={}",
                   player_bet, max_bet, min_raise_size, state.get_big_blind_size());
 
     std::set<int> raise_targets; // Pour éviter les doublons
 
     // Tailles de mise en BB
     auto bb_multipliers = get_bb_sizes_for_position(state);
-    spdlog::debug("ActionAbstraction: Tailles BB (multiplicateurs) disponibles pour P{}: {}", current_player, bb_multipliers.size());
+    spdlog::trace("ActionAbstraction: Tailles BB (multiplicateurs) disponibles pour P{}: {}", current_player, bb_multipliers.size());
 
     // Déterminer si c'est une situation d'open (ou premier bet sur une street)
     // vs. une situation de reraise.
     bool is_open_situation = (state.get_current_street() != Street::PREFLOP && max_bet == 0) || 
                              (max_bet <= state.get_big_blind_size());
 
-    spdlog::debug("ActionAbstraction: is_open_situation pour BB sizes = {} (max_bet={}, street={})", 
+    spdlog::trace("ActionAbstraction: is_open_situation pour BB sizes = {} (max_bet={}, street={})",
                   is_open_situation, max_bet, street_to_string(state.get_current_street()));
 
     for (double bb_mult : bb_multipliers) {
@@ -255,23 +255,23 @@ void ActionAbstraction::add_raise_actions(std::vector<Action>& actions, const Ga
             target = max_bet + raise_increment_if_applicable;
         }
 
-        spdlog::debug("ActionAbstraction: bb_mult={}, target={}, raise_increment_if_applicable={}", bb_mult, target, raise_increment_if_applicable);
+        spdlog::trace("ActionAbstraction: bb_mult={}, target={}, raise_increment_if_applicable={}", bb_mult, target, raise_increment_if_applicable);
 
-        if (target > max_bet && raise_increment_if_applicable >= min_raise_size && target <= player_bet + player_stack) {
-            spdlog::debug("ActionAbstraction: RAISE target {} (bb_mult {}, type: {}) retenu pour P{}", 
-                         target, bb_mult, (is_open_situation ? "total_target" : "increment"), current_player);
+        int raise_target_for_player = target - player_bet;
+
+        if (raise_target_for_player > 0 && raise_target_for_player <= player_stack) {
+            spdlog::trace("ActionAbstraction: Ajout RAISE (BB mult: {}) target: {} pour P{}", bb_mult, target, current_player);
             raise_targets.insert(target);
         } else {
-            spdlog::debug("ActionAbstraction: RAISE target {} (bb_mult {}, type: {}) rejeté. Conditions: target({}) > max_bet({}), incr({}) >= min_raise({}), target({}) <= stack+bet({}+{})",
-                         target, bb_mult, (is_open_situation ? "total_target" : "increment"), 
-                         target, max_bet, raise_increment_if_applicable, min_raise_size, target, player_stack, player_bet);
+            spdlog::trace("ActionAbstraction: RAISE (BB mult: {}) target: {} pour P{} ignoré (target_for_player={}, stack={})",
+                          bb_mult, target, current_player, raise_target_for_player, player_stack);
         }
     }
 
     // Fractions de pot
     double base_pot_for_fraction_calc = static_cast<double>(state.get_pot_size()); // Pot total actuel (inclut les mises de cette street)
     auto fractions = get_fractions_for_position(state);
-    spdlog::debug("ActionAbstraction: Fractions disponibles pour P{}: {}, base_pot_for_fraction_calc={}", current_player, fractions.size(), base_pot_for_fraction_calc);
+    spdlog::trace("ActionAbstraction: Fractions de pot disponibles pour P{}: {}", current_player, fractions.size());
 
     for (double fraction : fractions) {
         if (fraction <= 0) continue;

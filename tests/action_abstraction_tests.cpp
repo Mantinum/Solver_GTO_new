@@ -300,8 +300,9 @@ TEST_CASE("ActionAbstraction Exact Bet Sizes", "[action_abstraction]")
 
     SECTION("Preflop SB to act - Open with Exact Bet Size")
     {
+        // P0 (BTN/SB) to act
         ActionAbstraction::StreetPositionExactBetsMap exact = {
-            {Street::PREFLOP, { {Position::BTN, {7, 10}} }}
+            {Street::PREFLOP, { {Position::BTN, {7, 10}}, {Position::BB, {7, 10}} }}
         };
         ActionAbstraction abs(
             true, true,
@@ -312,12 +313,13 @@ TEST_CASE("ActionAbstraction Exact Bet Sizes", "[action_abstraction]")
         CHECK(has_action(actions, ActionType::CALL, 2)); // Call BB
         CHECK(has_action(actions, ActionType::RAISE, 7));
         CHECK(has_action(actions, ActionType::RAISE, 10));
-        CHECK(has_action(actions, ActionType::RAISE, 200));
+        CHECK(has_action(actions, ActionType::RAISE, 200)); // All-in
         CHECK(actions.size() == 5);
 
         // Exact bet trop petit → clampé
+        // P0 (BTN/SB) to act
         ActionAbstraction::StreetPositionExactBetsMap small = {
-            {Street::PREFLOP, { {Position::BTN, {3}} }}
+            {Street::PREFLOP, { {Position::BTN, {3}}, {Position::BB, {3}} }}
         };
         ActionAbstraction abs_small(
             true,
@@ -330,77 +332,94 @@ TEST_CASE("ActionAbstraction Exact Bet Sizes", "[action_abstraction]")
         actions = abs_small.get_abstract_actions(state);
         CHECK(has_action(actions, ActionType::RAISE, 4)); // Clamped to min raise (2 + 2)
         CHECK_FALSE(has_action(actions, ActionType::RAISE, 3));
-        CHECK(actions.size() == 4);
+        CHECK(actions.size() == 4); // FOLD, CALL, RAISE 4, ALL-IN (200)
     }
 
     SECTION("Flop P0 to act - Open with Exact Bet Size")
     {
         GameState flop_state(2, /*stack=*/200, /*ante=*/0, /*button_pos=*/0, BIG_BLIND_SIZE_INT);
-        // Simuler les actions préflop pour arriver au flop
-        // P0 (SB) call, P1 (BB) call (check)
-        flop_state.apply_action({0, ActionType::CALL, BIG_BLIND_SIZE_INT}); // P0 calls to match BB
-        flop_state.apply_action({1, ActionType::CALL, BIG_BLIND_SIZE_INT}); // P1 calls (effectively checks as already at BB)
-        // À ce point, apply_action devrait avoir détecté la fin du tour de mise préflop
-        // et appelé en interne ce qu'il faut pour passer au FLOP et distribuer les cartes.
+        flop_state.apply_action({0, ActionType::CALL, BIG_BLIND_SIZE_INT}); 
+        flop_state.apply_action({1, ActionType::CALL, BIG_BLIND_SIZE_INT}); 
 
         REQUIRE(flop_state.get_current_street() == Street::FLOP);
         REQUIRE(flop_state.get_current_player() == 0); // P0 (SB/BTN) agit en premier postflop
-        REQUIRE(flop_state.get_pot_size() == BIG_BLIND_SIZE_INT * 2); // Pot de 2 BBs
+        REQUIRE(flop_state.get_pot_size() == BIG_BLIND_SIZE_INT * 2); 
         int max_bet_flop = 0; for(int b : flop_state.get_current_bets()) max_bet_flop = std::max(max_bet_flop, b);
-        REQUIRE(max_bet_flop == 0); // Mises remises à zéro pour le flop
+        REQUIRE(max_bet_flop == 0); 
 
-        ActionAbstraction abs(true, true, {}, {}, { {Street::FLOP, {{Position::BTN, {5}}}}}, true);
+        // P0 (BTN/SB) to act
+        ActionAbstraction::StreetPositionExactBetsMap exact_flop_open = { 
+            {Street::FLOP, {{Position::BTN, {5}}, {Position::BB, {5}}}}
+        };
+        ActionAbstraction abs(true, true, {}, {}, exact_flop_open, true);
         auto actions = abs.get_abstract_actions(flop_state);
 
         CHECK(has_action(actions, ActionType::CALL, 0)); // Check
         CHECK(has_action(actions, ActionType::RAISE, 5));
         CHECK(has_action(actions, ActionType::RAISE, 198)); 
-        CHECK(actions.size() == 3); // CALL 0, RAISE 5, RAISE 198
+        CHECK(actions.size() == 3); 
     }
 
-    SECTION("Flop P1 to act - Facing P0 Bet - Re-raise with Exact Increment")
+    SECTION("Flop P1 to act - Facing P0 Bet - Re-raise with Exact Amount")
     {
         GameState flop_state(2, /*stack=*/200, /*ante=*/0, /*button_pos=*/0, BIG_BLIND_SIZE_INT);
-        // Simuler les actions préflop pour arriver au flop
-        flop_state.apply_action({0, ActionType::CALL, BIG_BLIND_SIZE_INT}); // P0 calls
-        flop_state.apply_action({1, ActionType::CALL, BIG_BLIND_SIZE_INT}); // P1 calls (checks)
-        // Passage au Flop, P0 (SB/BTN) to act.
-        
-        // P0 bets 10 on flop
+        flop_state.apply_action({0, ActionType::CALL, BIG_BLIND_SIZE_INT}); 
+        flop_state.apply_action({1, ActionType::CALL, BIG_BLIND_SIZE_INT}); 
         flop_state.apply_action({0, ActionType::RAISE, 10}); 
 
         REQUIRE(flop_state.get_current_street() == Street::FLOP);
         REQUIRE(flop_state.get_current_player() == 1); // P1 (BB) to act
-        // Pot: 4 (preflop) + 10 (P0 bet) = 14
         REQUIRE(flop_state.get_pot_size() == (BIG_BLIND_SIZE_INT * 2) + 10);
         int max_bet_flop_after_p0_bet = 0; for(int b : flop_state.get_current_bets()) max_bet_flop_after_p0_bet = std::max(max_bet_flop_after_p0_bet, b);
         REQUIRE(max_bet_flop_after_p0_bet == 10);
 
-        ActionAbstraction abs(true, true, {}, {}, { {Street::FLOP, {{Position::BTN, {12}}}}}, true);
-        auto actions = abs.get_abstract_actions(flop_state);
+        // P1 (BB) to act. P0 bet 10. Current bet for P1 is 0. To call = 10. 
+        // Min raise increment = P0's bet size (10). Min total raise for P1 = 10 (call) + 10 (increment) = 20.
+        // Exact bet sizes pour P1 (BB): {12, 25}
+        // - Mise exacte de 12 (total): 
+        //   L'incrément de relance serait 12 - 10 = 2.
+        //   Cet incrément de 2 est < min_raise_increment (10). 
+        //   Donc, la mise totale de 12 devrait être clampée au min_raise_total_bet (20).
+        // - Mise exacte de 25 (total):
+        //   L'incrément de relance est 25 - 10 = 15.
+        //   Cet incrément est >= min_raise_increment (10). Donc, 25 est une relance valide.
+        ActionAbstraction::StreetPositionExactBetsMap exact_reraise = { 
+            {Street::FLOP, {{Position::BB, {12, 25}}}} // Clé pour BB, car P1 est BB
+        }; 
+        ActionAbstraction abs_exact_reraise(true, true, {}, {}, exact_reraise, true);
+        auto actions = abs_exact_reraise.get_abstract_actions(flop_state);
 
         CHECK(has_action(actions, ActionType::FOLD, 0));
         CHECK(has_action(actions, ActionType::CALL, 10));
-        CHECK(has_action(actions, ActionType::RAISE, 198)); // P1 all-in (stack 200-2=198)
-        CHECK(actions.size() == 3); // FOLD, CALL 10, RAISE 198
+        CHECK(has_action(actions, ActionType::RAISE, 20)); // 12 clampé à min_raise_total_bet
+        CHECK(has_action(actions, ActionType::RAISE, 25)); // 25 est un raise valide
+        CHECK(has_action(actions, ActionType::RAISE, 198)); // All-in (stack P1: 200 - blind 2 = 198)
+        CHECK(actions.size() == 5); 
 
-        // Check clamping of increment if too small
-        ActionAbstraction abs_small(
+        // Test de clamping pour une mise exacte trop petite (inférieure ou égale à la mise adverse)
+        // P1 (BB) to act. P0 bet 10. Mise exacte de 5 pour BB.
+        // Une mise de 5 est <= max_bet_on_street (10), donc cette mise exacte devrait être ignorée pour les relances.
+        // Elle n'est pas non plus un call. Elle n'est rien.
+        ActionAbstraction::StreetPositionExactBetsMap small_exact_reraise = {
+            {Street::FLOP, {{Position::BB, {5}}}} // Clé pour BB
+        };
+        ActionAbstraction abs_small_exact_reraise(
             true,
             true,
             ActionAbstraction::StreetPositionFractionsMap{},
             ActionAbstraction::StreetPositionBBSizesMap{},
-            { {Street::FLOP, {{Position::BTN, {5}}}}}, // Idem, pour BTN, P1 est BB
-            true
+            small_exact_reraise,
+            true 
         );
-        actions = abs_small.get_abstract_actions(flop_state);
+        actions = abs_small_exact_reraise.get_abstract_actions(flop_state);
         REQUIRE(has_action(actions, ActionType::FOLD, 0));
         REQUIRE(has_action(actions, ActionType::CALL, 10));
-        REQUIRE(has_action(actions, ActionType::RAISE, 198));
+        REQUIRE(has_action(actions, ActionType::RAISE, 198)); // All-in uniquement, car 5 est ignoré.
+                                                            // min_raise (20) n'est pas généré car non demandé explicitement via une config.
         REQUIRE(actions.size() == 3);
     }
 
-    SECTION("Interaction with BB sizes and Fractions")
+    SECTION("Interaction: No Raise Options, No Check/Call, No All-in -> Fold Only")
     {
         GameState state_preflop(2, /*stack=*/200, /*ante=*/0, /*button_pos=*/0, BIG_BLIND_SIZE_INT);
         // SB posts 1, BB posts 2. Pot = 3. P0 (SB) to act. Player_bet=1, max_bet=2.

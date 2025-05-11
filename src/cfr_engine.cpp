@@ -79,25 +79,25 @@ double CFREngine::cfr_traverse(GameState current_state, std::vector<double>& pla
                       current_state.get_pot_size(), street_to_string(current_state.get_current_street()));
 
         double p0_utility = 0.0;
-        int pot_size = current_state.get_pot_size();
+        int final_pot_size = current_state.get_pot_size();
+        int p0_investment = current_state.get_player_total_investment_this_hand(0);
+        int p1_investment = (current_state.get_num_players() > 1) ? current_state.get_player_total_investment_this_hand(1) : 0;
 
-        // Pour un jeu à 2 joueurs, déterminer le statut de chaque joueur
         bool p0_active = !current_state.is_player_folded(0);
-        bool p1_active = false;
-        if (current_state.get_num_players() > 1) {
-            p1_active = !current_state.is_player_folded(1);
-        }
+        bool p1_active = (current_state.get_num_players() > 1) ? !current_state.is_player_folded(1) : false;
 
         if (current_state.get_num_players() == 2) { // Logique pour 2 joueurs
-            if (p0_active && !p1_active) { // P1 a foldé, P0 gagne
-                p0_utility = static_cast<double>(pot_size) / 2.0;
-                spdlog::trace("CFR Terminal: P1 folded. P0 utility: {}", p0_utility);
-            } else if (!p0_active && p1_active) { // P0 a foldé, P1 gagne
-                p0_utility = -static_cast<double>(pot_size) / 2.0;
-                spdlog::trace("CFR Terminal: P0 folded. P0 utility: {}", p0_utility);
+            if (p0_active && !p1_active) { // P1 a foldé, P0 gagne le pot
+                // P0 gagne ce que P1 a investi.
+                p0_utility = static_cast<double>(p1_investment);
+                spdlog::trace("CFR Terminal: P1 folded. P0 wins pot. P0 utility (P1 investment): {}", p0_utility);
+            } else if (!p0_active && p1_active) { // P0 a foldé, P1 gagne le pot
+                // P0 perd ce que P0 a investi.
+                p0_utility = -static_cast<double>(p0_investment);
+                spdlog::trace("CFR Terminal: P0 folded. P1 wins pot. P0 utility (-P0 investment): {}", p0_utility);
             } else if (p0_active && p1_active) { // Showdown entre P0 et P1
-                spdlog::trace("CFR Terminal: Showdown P0 vs P1. Board cards: {}", current_state.get_board_cards_dealt());
-                if (current_state.get_board_cards_dealt() == 5) {
+                spdlog::debug("CFR Terminal: Showdown P0 vs P1. Board cards: {}", current_state.get_board_cards_dealt());
+                if (current_state.get_board_cards_dealt() == 5) { // Board complet
                     const auto& p0_hand_vec = current_state.get_player_hand(0);
                     const auto& p1_hand_vec = current_state.get_player_hand(1);
                     const auto& board_array = current_state.get_board();
@@ -113,22 +113,22 @@ double CFREngine::cfr_traverse(GameState current_state, std::vector<double>& pla
                         if (rank_p0 == INVALID_HAND_RANK || rank_p1 == INVALID_HAND_RANK) {
                            spdlog::error("CFR Showdown: Invalid hand rank P0 ({}) or P1 ({}). State:\n{}", rank_p0, rank_p1, current_state.toString());
                            p0_utility = 0.0; // Erreur, traiter comme une égalité pour l'instant
-                        } else if (rank_p0 < rank_p1) { // P0 a un meilleur rang (plus bas), P0 gagne
-                            p0_utility = static_cast<double>(pot_size) / 2.0;
-                        } else if (rank_p1 < rank_p0) { // P1 a un meilleur rang (plus bas), P1 gagne
-                            p0_utility = -static_cast<double>(pot_size) / 2.0;
+                        } else if (rank_p0 < rank_p1) { // P0 gagne
+                            p0_utility = static_cast<double>(p1_investment); // P0 gagne l'investissement de P1
+                        } else if (rank_p1 < rank_p0) { // P1 gagne
+                            p0_utility = -static_cast<double>(p0_investment); // P0 perd son investissement
                         } else { // Égalité
+                            // P0 récupère son investissement, P1 récupère le sien. Gain net de P0 = 0.
                             p0_utility = 0.0;
                         }
-                        spdlog::trace("CFR Showdown: P0 rank {}, P1 rank {}. P0 utility: {}", rank_p0, rank_p1, p0_utility);
+                        spdlog::trace("CFR Showdown: P0 rank {}, P1 rank {}. P0 utility (net): {}", rank_p0, rank_p1, p0_utility);
                     } else {
                         spdlog::error("CFR Showdown: Incorrect card counts for eval. P0 hand: {}, P1 hand: {}, Board: {}. State:\n{}", 
                                       p0_hand_vec.size(), p1_hand_vec.size(), board_vec.size(), current_state.toString());
                         p0_utility = 0.0; // Erreur
                     }
-                } else { // Cas où le board n'a PAS 5 cartes (showdown au Flop ou au Turn)
-                    spdlog::trace("CFR Showdown: Board non complet ({} cartes). Calcul d'équité.", current_state.get_board_cards_dealt());
-
+                } else { // Cas où le board n'a PAS 5 cartes (showdown au Flop ou au Turn) -> Calcul d'équité
+                    spdlog::debug("CFR Showdown: Board non complet ({} cartes). Calcul d'équité.", current_state.get_board_cards_dealt());
                     const auto& p0_hand_cards = current_state.get_player_hand(0);
                     const auto& p1_hand_cards = current_state.get_player_hand(1);
                     
@@ -137,22 +137,46 @@ double CFREngine::cfr_traverse(GameState current_state, std::vector<double>& pla
                                       p0_hand_cards.size(), p1_hand_cards.size(), current_state.toString());
                         p0_utility = 0.0; // Erreur
                     } else {
-                        // Extraire les arguments pour la nouvelle signature de calculate_equity
                         std::vector<Card> board_cards_for_equity = current_state.get_board_vector();
                         std::vector<Card> deck_for_equity = current_state.get_remaining_deck_cards();
-                        int pot_for_equity = current_state.get_pot_size();
-
-                        p0_utility = this->calculate_equity(p0_hand_cards, p1_hand_cards, board_cards_for_equity, deck_for_equity, pot_for_equity);
-                        spdlog::trace("CFR Equity Calc Result for P0: {:.4f}", p0_utility);
+                        // Pour calculate_equity, le pot_size argument est le pot *total* disputé.
+                        // L'utilité retournée par calculate_equity est déjà le gain net moyen pour P0.
+                        // Exemple: si P0 a 60% d'équité sur un pot de 100, et que P0 et P1 ont chacun mis 50.
+                        // P0 s'attend à gagner 0.6 * 100 = 60. Son gain net est 60 - 50 = 10.
+                        // calculate_equity(..., pot_size=100) devrait retourner 10.
+                        // Si calculate_equity retourne +/- pot_halved, alors p0_utility est directement cette valeur.
+                        // La version actuelle de calculate_equity retourne (p0_wins - p1_wins) * pot_halved / total_runouts.
+                        // Ce qui est déjà l'EV net pour P0 si pot_halved est (investissement_P0+investissement_P1)/2.
+                        // Ici, p0_investment et p1_investment sont les investissements totaux.
+                        // Le pot total est p0_investment + p1_investment (si pas d'argent mort avant).
+                        // L'appel original à calculate_equity utilisait current_state.get_pot_size().
+                        // Il faut s'assurer que l'utilité retournée par calculate_equity est cohérente avec gain/perte net.
+                        // calculate_equity reçoit le pot total qui sera joué. Elle retourne l'EV de P0 sur ce pot total
+                        // par rapport à un partage équitable de ce pot (donc +/- EV(pot_total)/2 si HU)
+                        // Donc, l'utilité retournée est déjà l'EV nette de P0, en supposant une contribution équitable au pot disputé.
+                        // Si le pot_size passé à calculate_equity est `final_pot_size` (p0_inv + p1_inv),
+                        // et que calculate_equity retourne `valeur_attendue_P0_du_pot_total - contribution_P0_au_pot_total`,
+                        // alors c'est bon. 
+                        // La version actuelle de calculate_equity: (p0_wins - p1_wins) * (pot_size_arg / 2.0) / total_runouts.
+                        // Donc si on lui passe final_pot_size, elle calcule bien l'EV nette de P0.
+                        p0_utility = this->calculate_equity(p0_hand_cards, p1_hand_cards, board_cards_for_equity, deck_for_equity, final_pot_size);
+                        spdlog::trace("CFR Equity Calc Result for P0 (net): {:.4f}", p0_utility);
                     }
                 }
-            } else { // Cas imprévu à 2 joueurs (ex: les deux inactifs mais pas de fold clair?)
-                 spdlog::warn("CFR Terminal: État ambigu pour 2 joueurs (P0 active: {}, P1 active: {}). Pot: {}. Utility = 0.", p0_active, p1_active, pot_size);
+            } else { // Cas imprévu à 2 joueurs
+                 spdlog::warn("CFR Terminal: État ambigu pour 2 joueurs (P0 active: {}, P1 active: {}). Pot: {}. Utility = 0.", p0_active, p1_active, final_pot_size);
                  p0_utility = 0.0;
             }
         } else { // Plus de 2 joueurs ou moins de 2 (ne devrait pas arriver pour un jeu standard)
-            spdlog::warn("CFR Terminal: Calcul d'utilité non implémenté pour {} joueurs. Utility = 0.", current_state.get_num_players());
-            p0_utility = 0.0;
+            // TODO: Implémenter pour N joueurs.
+            // Pour l'instant, si P0 a foldé et num_players > 2, son utilité est -p0_investment.
+            if (!p0_active) { // P0 a foldé
+                p0_utility = -static_cast<double>(p0_investment);
+            } else {
+                 // P0 est actif, mais situation N-joueurs non gérée pour le showdown/equity.
+                spdlog::warn("CFR Terminal: Calcul d'utilité non implémenté pour {} joueurs actifs (P0 actif). Utility = 0.", current_state.get_num_players());
+                p0_utility = 0.0;
+            }
         }
         return p0_utility;
     }
@@ -196,6 +220,10 @@ double CFREngine::cfr_traverse(GameState current_state, std::vector<double>& pla
         const Action& action = legal_actions[i];
         GameState next_state = current_state; // Copie pour simuler l'action
         
+        // Log de l'action seulement si le niveau de log est suffisant
+        spdlog::debug("CFR Traverse: P{} action {} ({}). Key: {}", 
+                      current_player, i, gto_solver::action_to_string(action), infoset_key);
+
         current_hand_action_history_.push_back(action); // Ajouter l'action à l'historique
         next_state.apply_action(action);
         

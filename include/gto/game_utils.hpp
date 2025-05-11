@@ -19,6 +19,9 @@ Card card_from_string(const std::string& s);
 // Nouvelle fonction utilitaire
 std::string vec_to_string(const std::vector<Card>& cards);
 
+// Fonction utilitaire pour convertir une Action en string
+std::string action_to_string(const Action& action);
+
 } // namespace gto_solver
 
 #endif // GTO_GAME_UTILS_HPP 
